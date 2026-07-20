@@ -23,33 +23,74 @@
     device: "quantus-tablet-device-v1"
   };
 
-  const APP_DEFS = [
-    { key: "home", label: "Home", icon: "⌂", tone: "green", local: true },
-    { key: "daily", label: "Daily Briefing", icon: "☀", tone: "sand", local: true },
-    { key: "reading", label: "Lesen", icon: "▤", tone: "blue", local: true },
-    { key: "notes", label: "Noteflow", icon: "✎", tone: "green", local: true },
-    { key: "concepts", label: "Konzeptor", icon: "◇", tone: "coral", local: true },
-    { key: "learning", label: "Flashcards", icon: "▣", tone: "sand", local: true },
-    { key: "tasks", label: "Aufgaben", icon: "✓", tone: "green", local: true },
-    { key: "projects", label: "Projekte", icon: "▧", tone: "blue", local: true },
-    { key: "meetings", label: "Meetings", icon: "◉", tone: "coral", local: true },
-    { key: "habits", label: "Habits", icon: "◌", tone: "green", local: true },
-    { key: "budget", label: "Budget", icon: "₣", tone: "sand", local: true },
-    { key: "split", label: "Split-Screen", icon: "◫", tone: "blue", local: true },
-    { key: "drive", label: "Quantus Drive", icon: "▰", tone: "blue", external: "drive.html" },
-    { key: "docstudio", label: "DocStudio", icon: "▥", tone: "coral", external: "docstudio.html" },
-    { key: "nobraine", label: "No-Braine", icon: "♨", tone: "green", external: "nobraine.html" },
-    { key: "bm", label: "BM Lernen", icon: "∑", tone: "sand", external: "bm.html" },
-    { key: "polaris", label: "Polaris", icon: "✦", tone: "green", local: true },
-    { key: "settings", label: "Einstellungen", icon: "⚙", tone: "blue", local: true }
+  // Vollstaendige AI-Sync-Module. Die Tablet-Huelle bettet jeweils die originale
+  // App ein, statt eine reduzierte Kopie mit abweichendem Funktionsumfang zu
+  // pflegen. Dadurch sind neue AI-Sync-Funktionen sofort auch hier verfuegbar.
+  const FULL_APP_DEFS = [
+    { key: "dashboard", label: "Dashboard", icon: "⌂", tone: "green", fullRoute: "dashboard", group: "Übersicht" },
+    { key: "daily", label: "Heute", icon: "☀", tone: "sand", fullRoute: "today", group: "Übersicht" },
+    { key: "dailybriefing", label: "Daily Briefing", icon: "◫", tone: "sand", fullRoute: "dailybriefing", group: "Übersicht" },
+    { key: "tasks", label: "Aufgaben", icon: "✓", tone: "green", fullRoute: "tasks", group: "Planen" },
+    { key: "projects", label: "Projekte", icon: "▧", tone: "blue", fullRoute: "projects", group: "Planen" },
+    { key: "weekplanning", label: "Wochenplanung", icon: "▤", tone: "blue", fullPath: "nobraine.html", group: "Planen" },
+    { key: "calendar", label: "Kalender", icon: "◉", tone: "coral", fullRoute: "calendar", group: "Planen" },
+    { key: "googlecalendar", label: "Google Kalender", icon: "31", tone: "blue", fullRoute: "googlecalendar", group: "Planen" },
+    { key: "time", label: "Zeiterfassung", icon: "◷", tone: "green", fullRoute: "time", group: "Planen" },
+    { key: "workload", label: "Auslastung", icon: "▥", tone: "coral", fullRoute: "workload", group: "Planen" },
+    { key: "goals", label: "Ziele", icon: "◎", tone: "green", fullRoute: "goals", group: "Planen" },
+    { key: "strategies", label: "Strategien", icon: "◇", tone: "blue", fullRoute: "strategies", group: "Planen" },
+    { key: "programs", label: "Programme", icon: "▦", tone: "coral", fullRoute: "programs", group: "Planen" },
+    { key: "concepts", label: "Konzeptor", icon: "◆", tone: "coral", fullRoute: "concepts", group: "Wissen" },
+    { key: "notes", label: "Noteflow", icon: "✎", tone: "green", fullRoute: "notes", group: "Wissen" },
+    { key: "reading", label: "Reading Hub", icon: "▤", tone: "blue", fullRoute: "readinghub", group: "Wissen" },
+    { key: "learning", label: "Recall Lab", icon: "▣", tone: "sand", fullRoute: "learn", group: "Wissen" },
+    { key: "smarter", label: "Smarter", icon: "Σ", tone: "sand", fullRoute: "smarter", group: "Wissen" },
+    { key: "knowledge", label: "Wissensbasis", icon: "◈", tone: "blue", fullRoute: "knowledge", group: "Wissen" },
+    { key: "ideas", label: "Ideen", icon: "✦", tone: "sand", fullRoute: "ideas", group: "Wissen" },
+    { key: "thesis", label: "Thesis Studio", icon: "T", tone: "coral", fullRoute: "thesis", group: "Wissen" },
+    { key: "journal", label: "Journal", icon: "J", tone: "green", fullRoute: "journal", group: "Wissen" },
+    { key: "reflecta", label: "Reflecta", icon: "◐", tone: "blue", fullRoute: "reflecta", group: "Wissen" },
+    { key: "meetings", label: "Meetings", icon: "◉", tone: "coral", fullRoute: "meetings", group: "Zusammenarbeit" },
+    { key: "organizations", label: "Organisationen", icon: "▥", tone: "blue", fullRoute: "organizations", group: "Zusammenarbeit" },
+    { key: "persons", label: "Personen", icon: "♙", tone: "green", fullRoute: "persons", group: "Zusammenarbeit" },
+    { key: "messages", label: "Nachrichten", icon: "✉", tone: "coral", fullRoute: "messages", group: "Zusammenarbeit" },
+    { key: "gmail", label: "Gmail", icon: "M", tone: "coral", fullRoute: "gmail", group: "Zusammenarbeit" },
+    { key: "protocols", label: "Protokolle", icon: "¶", tone: "sand", fullRoute: "protocols", group: "Zusammenarbeit" },
+    { key: "workflows", label: "Workflows", icon: "↻", tone: "blue", fullRoute: "workflows", group: "Zusammenarbeit" },
+    { key: "updates", label: "Updates", icon: "↥", tone: "green", fullRoute: "updates", group: "Steuern" },
+    { key: "decisions", label: "Entscheidungen", icon: "⚖", tone: "sand", fullRoute: "decisions", group: "Steuern" },
+    { key: "measures", label: "Massnahmen", icon: "!", tone: "coral", fullRoute: "measures", group: "Steuern" },
+    { key: "statistics", label: "Statistiken", icon: "▥", tone: "blue", fullRoute: "statistics", group: "Steuern" },
+    { key: "reports", label: "Berichte", icon: "▤", tone: "green", fullRoute: "reports", group: "Steuern" },
+    { key: "budget", label: "Budget", icon: "₣", tone: "sand", fullRoute: "budget", group: "Steuern" },
+    { key: "habits", label: "Habits", icon: "◌", tone: "green", fullRoute: "habits", group: "Steuern" },
+    { key: "drive", label: "Quantus Drive", icon: "▰", tone: "blue", fullPath: "drive.html", group: "Werkzeuge" },
+    { key: "docstudio", label: "DocStudio", icon: "D", tone: "coral", fullPath: "docstudio.html", group: "Werkzeuge" },
+    { key: "nobraine", label: "No-Braine", icon: "N", tone: "green", fullPath: "nobraine.html", group: "Werkzeuge" },
+    { key: "bm", label: "BM Lernen", icon: "∑", tone: "sand", fullPath: "bm.html", group: "Werkzeuge" },
+    { key: "pdfeditor", label: "PDF-Editor", icon: "PDF", tone: "coral", fullRoute: "pdfeditor", group: "Werkzeuge" },
+    { key: "browser", label: "Browser", icon: "◎", tone: "blue", fullRoute: "browser", group: "Werkzeuge" },
+    { key: "briefings", label: "Briefings", icon: "B", tone: "green", fullRoute: "briefings", group: "Werkzeuge" },
+    { key: "quantusproject", label: "Quantus Projekt", icon: "Q", tone: "blue", fullRoute: "quantusproject", group: "Werkzeuge" },
+    { key: "polaris", label: "Polaris", icon: "✦", tone: "green", fullRoute: "polaris", group: "Werkzeuge", allow: "microphone; clipboard-read; clipboard-write" }
   ];
+
+  const APP_DEFS = [
+    { key: "home", label: "Tablet Home", icon: "⌂", tone: "green", local: true, group: "Tablet" },
+    ...FULL_APP_DEFS,
+    { key: "split", label: "Split-Screen", icon: "◫", tone: "blue", local: true, group: "Tablet" },
+    { key: "settings", label: "Einstellungen", icon: "⚙", tone: "blue", local: true, group: "Tablet" }
+  ];
+
+  const FULL_APPS = Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app]));
 
   const ROUTE_TITLES = {
     home: "Home", daily: "Heute", reading: "Lesen", notes: "Noteflow",
     concepts: "Konzeptor", learning: "Lernen", tasks: "Aufgaben",
     projects: "Projekte", meetings: "Meetings", habits: "Habits",
     budget: "Budget", split: "Split-Screen", polaris: "Polaris",
-    settings: "Einstellungen", apps: "Alle Apps"
+    settings: "Einstellungen", apps: "Alle Apps",
+    ...Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app.label]))
   };
 
   const COLLECTION_CONFIG = {
@@ -645,12 +686,39 @@
   }
 
   function appTile(app) {
-    const action = app.external ? `data-action="external" data-path="${attr(app.external)}"` : `data-action="go" data-route="${attr(app.key)}"`;
-    return `<button class="app-tile" ${action}><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><strong>${esc(app.label)}</strong></button>`;
+    const action = `data-action="go" data-route="${attr(app.key)}"`;
+    const scope = app.fullRoute || app.fullPath ? `<small>Vollversion</small>` : `<small>Tablet</small>`;
+    return `<button class="app-tile" ${action}><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><strong>${esc(app.label)}</strong>${scope}</button>`;
   }
 
   function renderApps() {
-    return `<div class="view">${viewHeader("Alle Apps", "Alle lokalen und verbundenen Quantus-Module.", "")}<div class="apps-grid">${APP_DEFS.map(appTile).join("")}</div></div>`;
+    const groups = [...new Set(APP_DEFS.map((app) => app.group || "Weitere"))];
+    return `<div class="view apps-catalog">${viewHeader("Alle Apps", "Der vollständige AI-Sync-Funktionsumfang in der tabletoptimierten Quantus-Hülle.", "")}${groups.map((group) => `<section class="app-group"><div class="app-group-head"><h2>${esc(group)}</h2><span class="badge">${APP_DEFS.filter((app) => (app.group || "Weitere") === group).length}</span></div><div class="apps-grid">${APP_DEFS.filter((app) => (app.group || "Weitere") === group).map(appTile).join("")}</div></section>`).join("")}</div>`;
+  }
+
+  function fullAppUrl(app) {
+    const base = appBaseUrl();
+    if (app.fullPath) return new URL(String(app.fullPath).replace(/^\/+/, ""), `${base}/`).toString();
+    const url = new URL(`${base}/`);
+    url.searchParams.set("tablet", "1");
+    url.hash = `/${app.fullRoute || app.key}`;
+    return url.toString();
+  }
+
+  function renderFullApp(app) {
+    const url = fullAppUrl(app);
+    const allow = app.allow || "clipboard-read; clipboard-write";
+    return `<div class="view full-app-view">
+      <div class="full-app-toolbar">
+        <div class="full-app-identity"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><span class="eyebrow">AI Sync · Vollversion</span><h1>${esc(app.label)}</h1></div></div>
+        <div class="head-actions"><button class="btn" data-action="reload-full-app">↻ Neu laden</button><button class="btn primary" data-action="external-url" data-url="${attr(url)}">↗ Separat öffnen</button></div>
+      </div>
+      <div class="full-app-frame-shell">
+        <div class="frame-loading"><span class="status-dot syncing"></span><strong>${esc(app.label)} wird aus AI Sync geladen</strong></div>
+        <iframe id="fullAppFrame" class="full-app-frame" src="${attr(url)}" title="${attr(app.label)} – vollständige AI-Sync-App" allow="${attr(allow)}" loading="eager"></iframe>
+      </div>
+      <p class="frame-note">Diese Ansicht verwendet direkt die vollständige AI-Sync-App. Projekte, Aufgaben, Notizen und alle weiteren Module besitzen deshalb denselben Funktionsumfang und denselben Datenstand.</p>
+    </div>`;
   }
 
   function renderPolaris() {
@@ -696,19 +764,9 @@
     viewTitle.textContent = ROUTE_TITLES[state.route] || "Quantus";
     document.querySelectorAll("[data-dock]").forEach((button) => button.classList.toggle("on", button.dataset.dock === state.route));
     let html;
-    if (state.route === "home") html = renderHome();
-    else if (state.route === "daily") html = renderDaily();
-    else if (state.route === "tasks") html = renderCollectionView("tasks");
-    else if (state.route === "projects") html = renderCollectionView("projects");
-    else if (state.route === "notes") html = renderCollectionView("notes");
-    else if (state.route === "meetings") html = renderCollectionView("meetings");
-    else if (state.route === "reading") html = renderReading();
-    else if (state.route === "learning") html = renderLearning();
-    else if (state.route === "concepts") html = renderConcepts();
-    else if (state.route === "habits") html = renderHabits();
-    else if (state.route === "budget") html = renderBudget();
+    if (FULL_APPS[state.route]) html = renderFullApp(FULL_APPS[state.route]);
+    else if (state.route === "home") html = renderHome();
     else if (state.route === "apps") html = renderApps();
-    else if (state.route === "polaris") html = renderPolaris();
     else if (state.route === "split") html = renderSplit();
     else if (state.route === "settings") html = renderSettings();
     else html = renderHome();
@@ -717,7 +775,13 @@
   }
 
   function appBaseUrl() {
-    return String(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL).replace(/\/+$/, "");
+    try {
+      const url = new URL(String(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL));
+      if (!/^https?:$/.test(url.protocol)) throw new Error("Ungueltiges Protokoll");
+      return url.toString().replace(/\/+$/, "");
+    } catch (_) {
+      return DEFAULT_AI_SYNC_URL;
+    }
   }
 
   function openExternal(path) {
@@ -904,6 +968,11 @@
     if (action === "theme") {
       const next = document.documentElement.classList.contains("theme-light") ? "dark" : "light";
       state.settings.theme = next; saveJson(LOCAL_KEYS.settings,state.settings); applyTheme(next); return;
+    }
+    if (action === "reload-full-app") {
+      const frame = document.getElementById("fullAppFrame");
+      if (frame) frame.src = frame.src;
+      return;
     }
     if (action === "new-entity") { openEntityForm(button.dataset.collection); return; }
     if (action === "edit-entity") { openEntityForm(button.dataset.collection,button.dataset.id); return; }

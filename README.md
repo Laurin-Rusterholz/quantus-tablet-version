@@ -4,11 +4,26 @@ Quantus Tablet ist die touchoptimierte, installierbare Tablet-Oberfläche für
 AI Sync. Die App verwendet dieselben Quantus-Daten wie die bestehende
 Desktop-App und ist als statische PWA für Netlify gebaut.
 
-## Enthaltene erste Version
+## Vollstaendiger Funktionsumfang
+
+Die Tablet-App bindet alle produktiven AI-Sync-Module direkt in eine
+touchoptimierte Tablet-Huelle ein. Dadurch verwenden Projekte, Aufgaben,
+Noteflow, Meetings, Konzeptor, Ziele, Strategien, Programme, Organisationen,
+Statistiken, Berichte, Polaris und die weiteren Apps exakt den Funktionsumfang
+der Hauptanwendung. Neue Funktionen in AI Sync stehen ohne eine zweite,
+abweichende Implementierung auch auf dem Tablet zur Verfuegung.
+
+Der lokale Tablet-Homescreen bleibt als schnelle Tageszentrale bestehen. Von
+dort und aus dem App-Katalog oeffnen die vollstaendigen Module innerhalb der
+Tablet-App. Jedes Modul kann bei Bedarf auch separat in AI Sync geoeffnet
+werden.
+
+## Tablet-Funktionen
 
 - iPad-artiger Homescreen mit Dashboard, Widgets, App-Raster und Dock
 - Daily Briefing mit Aufgaben, Terminen und Gewohnheiten
-- Aufgaben, Projekte, Meetings, Noteflow und Konzeptor mit gemeinsamem CRUD
+- vollstaendiger AI-Sync-App-Katalog mit mehr als 40 Modulen
+- Projekte, Aufgaben, Meetings, Noteflow und Konzeptor in der AI-Sync-Vollversion
 - Quantus-Drive-Leseansicht inklusive PDF-/Dokumentvorschau
 - Textauswahl mit Übersetzung, Polaris-Übergabe und Karteikarten-Erstellung
 - Flashcards und Smarter-Lernstoff
