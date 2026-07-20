@@ -1,5 +1,5 @@
-const CACHE = "quantus-tablet-v2-full-apps";
-const SHELL = ["/", "/index.html", "/styles.css", "/sync-core.js", "/app.js", "/icon.svg", "/manifest.webmanifest"];
+const CACHE = "quantus-tablet-v3-native-workspace";
+const SHELL = ["/", "/index.html", "/styles.css", "/tablet-workspace.css", "/sync-core.js", "/tablet-workspace.js", "/app.js", "/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

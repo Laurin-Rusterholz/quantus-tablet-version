@@ -77,6 +77,7 @@
 
   const APP_DEFS = [
     { key: "home", label: "Tablet Home", icon: "⌂", tone: "green", local: true, group: "Tablet" },
+    { key: "workspace", label: "Tablet Canvas", icon: "✎", tone: "coral", local: true, group: "Tablet" },
     ...FULL_APP_DEFS,
     { key: "split", label: "Split-Screen", icon: "◫", tone: "blue", local: true, group: "Tablet" },
     { key: "settings", label: "Einstellungen", icon: "⚙", tone: "blue", local: true, group: "Tablet" }
@@ -89,7 +90,7 @@
     concepts: "Konzeptor", learning: "Lernen", tasks: "Aufgaben",
     projects: "Projekte", meetings: "Meetings", habits: "Habits",
     budget: "Budget", split: "Split-Screen", polaris: "Polaris",
-    settings: "Einstellungen", apps: "Alle Apps",
+    settings: "Einstellungen", apps: "Alle Apps", workspace: "Tablet Canvas",
     ...Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app.label]))
   };
 
@@ -125,6 +126,7 @@
   let firebaseApp = null;
   let auth = null;
   let db = null;
+  let storage = null;
   let listeners = [];
   let clockTimer = null;
   let renderScheduled = false;
@@ -258,6 +260,7 @@
       firebaseApp = window.firebase.apps.length ? window.firebase.app() : window.firebase.initializeApp(FIREBASE_CONFIG);
       auth = firebaseApp.auth();
       db = firebaseApp.database(RTDB_URL);
+      storage = firebaseApp.storage();
       auth.setPersistence(window.firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
       auth.onAuthStateChanged(handleAuth, (error) => {
         state.authReady = true;
@@ -531,7 +534,7 @@
         </section>
         <section class="widget span-12" style="min-height:auto">
           <div class="widget-head"><span class="widget-icon">▦</span><h2>Quantus Apps</h2><button data-action="apps">Alle Apps</button></div>
-          <div class="apps-grid">${APP_DEFS.filter((app) => ["reading","notes","concepts","learning","projects","meetings"].includes(app.key)).map(appTile).join("")}</div>
+          <div class="apps-grid">${APP_DEFS.filter((app) => ["workspace","reading","notes","concepts","learning","projects","meetings"].includes(app.key)).map(appTile).join("")}</div>
         </section>
       </div>
     </div>`;
@@ -711,7 +714,7 @@
     return `<div class="view full-app-view">
       <div class="full-app-toolbar">
         <div class="full-app-identity"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><span class="eyebrow">AI Sync · Vollversion</span><h1>${esc(app.label)}</h1></div></div>
-        <div class="head-actions"><button class="btn" data-action="reload-full-app">↻ Neu laden</button><button class="btn primary" data-action="external-url" data-url="${attr(url)}">↗ Separat öffnen</button></div>
+        <div class="head-actions"><button class="btn workspace-launch" data-action="workspace">✎ Handschrift & Anhänge</button><button class="btn reload-full-app" data-action="reload-full-app">↻ Neu laden</button><button class="btn primary" data-action="external-url" data-url="${attr(url)}">↗ Separat öffnen</button></div>
       </div>
       <div class="full-app-frame-shell">
         <div class="frame-loading"><span class="status-dot syncing"></span><strong>${esc(app.label)} wird aus AI Sync geladen</strong></div>
@@ -767,11 +770,13 @@
     if (FULL_APPS[state.route]) html = renderFullApp(FULL_APPS[state.route]);
     else if (state.route === "home") html = renderHome();
     else if (state.route === "apps") html = renderApps();
+    else if (state.route === "workspace") html = window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
     else if (state.route === "split") html = renderSplit();
     else if (state.route === "settings") html = renderSettings();
     else html = renderHome();
     main.innerHTML = html;
     updateAccountButton();
+    window.QuantusTabletWorkspace?.mountRoute?.();
   }
 
   function appBaseUrl() {
@@ -969,6 +974,7 @@
       const next = document.documentElement.classList.contains("theme-light") ? "dark" : "light";
       state.settings.theme = next; saveJson(LOCAL_KEYS.settings,state.settings); applyTheme(next); return;
     }
+    if (action === "workspace") { window.QuantusTabletWorkspace?.open?.(); return; }
     if (action === "reload-full-app") {
       const frame = document.getElementById("fullAppFrame");
       if (frame) frame.src = frame.src;
@@ -1043,6 +1049,10 @@
     if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
   }
 
-  window.__quantusTablet = { state, executeOperation, Core, APP_STORE_PATH, RTDB_URL };
+  window.__quantusTablet = {
+    state, executeOperation, makeOperation, collection, go, toast, Core, APP_STORE_PATH, RTDB_URL,
+    getStorage: () => storage,
+    getDatabase: () => db
+  };
   boot();
 })();

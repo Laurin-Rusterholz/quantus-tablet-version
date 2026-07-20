@@ -4,7 +4,7 @@
   "private": true,
   "description": "Touchoptimierte Quantus-Tablet-PWA mit gemeinsamer AI-Sync-Datenbasis",
   "scripts": {
-    "test": "node tests/sync-core.test.cjs && node tests/structure.test.cjs",
-    "check": "node --check public/sync-core.js && node --check public/app.js && npm test"
+    "test": "node tests/sync-core.test.cjs && node tests/workspace.test.cjs && node tests/structure.test.cjs",
+    "check": "node --check public/sync-core.js && node --check public/tablet-workspace.js && node --check public/app.js && npm test"
   }
 }
