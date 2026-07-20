@@ -1,0 +1,25 @@
+{
+  "name": "Quantus Tablet",
+  "short_name": "Quantus",
+  "description": "Die touchoptimierte Tablet-Oberfläche für AI Sync.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#171c20",
+  "theme_color": "#171c20",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Heute", "url": "/#/daily" },
+    { "name": "Aufgaben", "url": "/#/tasks" },
+    { "name": "Lesen", "url": "/#/reading" },
+    { "name": "Polaris", "url": "/#/polaris" }
+  ]
+}

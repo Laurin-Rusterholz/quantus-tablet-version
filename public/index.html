@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="de" class="theme-dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#171c20">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Quantus">
+  <title>Quantus Tablet</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem("quantus-tablet-theme") || localStorage.getItem("quantus_themeMode") || "dark";
+        var light = mode === "light" || (mode === "auto" && matchMedia("(prefers-color-scheme: light)").matches);
+        document.documentElement.className = light ? "theme-light" : "theme-dark";
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button class="brand" data-action="go" data-route="home" aria-label="Quantus Startseite">
+        <span class="brand-mark">Q</span>
+        <span class="brand-copy"><strong>Quantus</strong><small>Tablet</small></span>
+      </button>
+      <div class="top-context">
+        <strong id="viewTitle">Heute</strong>
+        <span id="clock" class="clock"></span>
+      </div>
+      <div class="top-actions">
+        <button class="icon-button sync-button" data-action="show-sync" aria-label="Synchronisationsstatus">
+          <span id="syncDot" class="status-dot offline"></span>
+          <span id="syncLabel" class="hide-small">Offline</span>
+        </button>
+        <button class="icon-button" data-action="search" aria-label="Quantus durchsuchen">⌕</button>
+        <button class="icon-button" data-action="theme" aria-label="Darstellung wechseln">◐</button>
+        <button class="account-button" id="accountButton" data-action="account" aria-label="Konto">LR</button>
+      </div>
+    </header>
+
+    <main id="main" class="main" tabindex="-1" aria-live="polite"></main>
+
+    <nav class="dock" aria-label="Hauptnavigation">
+      <button data-action="go" data-route="home" data-dock="home"><span>⌂</span><small>Home</small></button>
+      <button data-action="go" data-route="daily" data-dock="daily"><span>☀</span><small>Heute</small></button>
+      <button data-action="go" data-route="reading" data-dock="reading"><span>▤</span><small>Lesen</small></button>
+      <button class="polaris-dock" data-action="polaris"><span class="orb-mini"></span><small>Polaris</small></button>
+      <button data-action="go" data-route="notes" data-dock="notes"><span>✎</span><small>Noteflow</small></button>
+      <button data-action="go" data-route="tasks" data-dock="tasks"><span>✓</span><small>Aufgaben</small></button>
+      <button data-action="apps"><span>▦</span><small>Apps</small></button>
+    </nav>
+  </div>
+
+  <div id="overlayRoot"></div>
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <script src="sync-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
