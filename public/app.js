@@ -23,9 +23,10 @@
     device: "quantus-tablet-device-v1"
   };
 
-  // Vollstaendige AI-Sync-Module. Die Tablet-Huelle bettet jeweils die originale
-  // App ein, statt eine reduzierte Kopie mit abweichendem Funktionsumfang zu
-  // pflegen. Dadurch sind neue AI-Sync-Funktionen sofort auch hier verfuegbar.
+  // AI-Sync-Modulkatalog. Module mit einer eigenen Tablet-Ansicht (Aufgaben,
+  // Projekte, Notizen, Kalender, Ziele, Strategien und weitere) rendern nativ.
+  // Alle uebrigen Werkzeuge oeffnen als native Uebersicht und lassen sich bei
+  // Bedarf in einem separaten Fenster starten – nichts wird mehr eingebettet.
   const FULL_APP_DEFS = [
     { key: "dashboard", label: "Dashboard", icon: "⌂", tone: "green", fullRoute: "dashboard", group: "Übersicht" },
     { key: "daily", label: "Heute", icon: "☀", tone: "sand", fullRoute: "today", group: "Übersicht" },
@@ -94,13 +95,35 @@
     ...Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app.label]))
   };
 
+  // Native Tablet-Sammlungen. Jede Sammlung wird als eigenstaendige Tablet-Ansicht
+  // gerendert (Liste, Formular, Suche) und synchronisiert ueber dieselbe
+  // Firebase-Transaktion wie AI Sync. Der Schluessel ist zugleich der Name der
+  // Entitaet im Quantus-Payload, damit Operationen und Polaris-Inbox passen.
   const COLLECTION_CONFIG = {
     tasks: { label: "Aufgabe", plural: "Aufgaben", icon: "✓", route: "tasks" },
     projects: { label: "Projekt", plural: "Projekte", icon: "▧", route: "projects" },
     notes: { label: "Notiz", plural: "Notizen", icon: "✎", route: "notes" },
     meetings: { label: "Meeting", plural: "Meetings", icon: "◉", route: "meetings" },
-    concepts: { label: "Konzept", plural: "Konzepte", icon: "◇", route: "concepts" }
+    concepts: { label: "Konzept", plural: "Konzepte", icon: "◇", route: "concepts" },
+    goals: { label: "Ziel", plural: "Ziele", icon: "◎", route: "goals" },
+    strategies: { label: "Strategie", plural: "Strategien", icon: "◇", route: "strategies" },
+    programs: { label: "Programm", plural: "Programme", icon: "▦", route: "programs" },
+    organizations: { label: "Organisation", plural: "Organisationen", icon: "▥", route: "organizations" },
+    persons: { label: "Person", plural: "Personen", icon: "♙", route: "persons" },
+    ideas: { label: "Idee", plural: "Ideen", icon: "✦", route: "ideas" },
+    decisions: { label: "Entscheidung", plural: "Entscheidungen", icon: "⚖", route: "decisions" },
+    protocols: { label: "Protokoll", plural: "Protokolle", icon: "¶", route: "protocols" },
+    workflows: { label: "Workflow", plural: "Workflows", icon: "↻", route: "workflows" }
   };
+
+  // Routen mit einer eigenstaendigen Tablet-Ansicht. Alle uebrigen AI-Sync-Module
+  // oeffnen als native Modul-Uebersicht mit optionalem Sprung in ein separates
+  // Fenster – es wird bewusst keine fremde App mehr in einem iframe eingebettet.
+  const NATIVE_ROUTES = new Set([
+    "home", "daily", "dailybriefing", "reading", "learning", "habits", "budget",
+    "polaris", "concepts", "calendar", "workspace", "split", "settings", "apps",
+    ...Object.keys(COLLECTION_CONFIG)
+  ]);
 
   const state = {
     route: "home",
@@ -579,7 +602,8 @@
     if (name === "projects") return "Ziele, Meilensteine und nächste Schritte an einem Ort.";
     if (name === "notes") return "Deine synchronisierte Wissens- und Notizzentrale.";
     if (name === "meetings") return "Vorbereitung, Durchführung und Nachbearbeitung deiner Sitzungen.";
-    return "Ideen, Argumentationen und Strategien visuell entwickeln.";
+    const config = COLLECTION_CONFIG[name];
+    return `${config ? config.plural : "Einträge"} aus AI Sync – Änderungen sind sofort auf Tablet und Desktop sichtbar.`;
   }
 
   function entityCard(name, item) {
@@ -690,7 +714,8 @@
 
   function appTile(app) {
     const action = `data-action="go" data-route="${attr(app.key)}"`;
-    const scope = app.fullRoute || app.fullPath ? `<small>Vollversion</small>` : `<small>Tablet</small>`;
+    const native = app.local || NATIVE_ROUTES.has(app.key);
+    const scope = `<small>${native ? "Tablet" : "Separat"}</small>`;
     return `<button class="app-tile" ${action}><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><strong>${esc(app.label)}</strong>${scope}</button>`;
   }
 
@@ -699,28 +724,52 @@
     return `<div class="view apps-catalog">${viewHeader("Alle Apps", "Der vollständige AI-Sync-Funktionsumfang in der tabletoptimierten Quantus-Hülle.", "")}${groups.map((group) => `<section class="app-group"><div class="app-group-head"><h2>${esc(group)}</h2><span class="badge">${APP_DEFS.filter((app) => (app.group || "Weitere") === group).length}</span></div><div class="apps-grid">${APP_DEFS.filter((app) => (app.group || "Weitere") === group).map(appTile).join("")}</div></section>`).join("")}</div>`;
   }
 
-  function fullAppUrl(app) {
-    const base = appBaseUrl();
-    if (app.fullPath) return new URL(String(app.fullPath).replace(/^\/+/, ""), `${base}/`).toString();
-    const url = new URL(`${base}/`);
-    url.searchParams.set("tablet", "1");
-    url.hash = `/${app.fullRoute || app.key}`;
-    return url.toString();
+  function renderCalendar() {
+    const events = [...collection("calendarEvents"), ...collection("meetings")]
+      .map((event) => ({ event, key: String(event.date || event.start || event.startAt || "").slice(0, 10) }))
+      .filter((entry) => entry.key)
+      .sort((a, b) => a.key.localeCompare(b.key) || String(a.event.start || a.event.time || "").localeCompare(String(b.event.start || b.event.time || "")));
+    const today = localDateKey();
+    const upcoming = events.filter((entry) => entry.key >= today);
+    const grouped = {};
+    upcoming.forEach((entry) => { (grouped[entry.key] = grouped[entry.key] || []).push(entry.event); });
+    const days = Object.keys(grouped).sort().slice(0, 30);
+    return `<div class="view">
+      ${viewHeader("Kalender", "Deine Termine und Meetings als tabletnative Agenda.", `<button class="btn" data-action="split-with" data-route="daily">◫ Split-Screen</button><button class="btn primary" data-action="new-entity" data-collection="meetings">＋ Termin</button>`)}
+      ${loginBanner()}
+      <div class="dashboard-grid">${days.map((day) => `<section class="widget span-6"><div class="widget-head"><span class="widget-icon">◉</span><h2>${esc(formatDate(day, { weekday: "long", day: "2-digit", month: "long" }))}${day === today ? " · Heute" : ""}</h2></div><div class="item-list">${grouped[day].map((event) => `<div class="list-item"><span class="badge accent">${esc(formatTime(event.start || event.startAt || event.time) || "Ganztags")}</span><div class="item-main"><div class="item-title">${esc(itemTitle(event, "Termin"))}</div><div class="item-meta">${esc(event.location || event.place || event.description || "")}</div></div></div>`).join("")}</div></section>`).join("") || emptyState("◉", "Keine kommenden Termine", "Erstelle einen Termin auf dem Tablet oder in AI Sync.")}</div>
+    </div>`;
   }
 
-  function renderFullApp(app) {
-    const url = fullAppUrl(app);
-    const allow = app.allow || "clipboard-read; clipboard-write";
-    return `<div class="view full-app-view">
-      <div class="full-app-toolbar">
-        <div class="full-app-identity"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><span class="eyebrow">AI Sync · Vollversion</span><h1>${esc(app.label)}</h1></div></div>
-        <div class="head-actions"><button class="btn workspace-launch" data-action="workspace">✎ Handschrift & Anhänge</button><button class="btn reload-full-app" data-action="reload-full-app">↻ Neu laden</button><button class="btn primary" data-action="external-url" data-url="${attr(url)}">↗ Separat öffnen</button></div>
-      </div>
-      <div class="full-app-frame-shell">
-        <div class="frame-loading"><span class="status-dot syncing"></span><strong>${esc(app.label)} wird aus AI Sync geladen</strong></div>
-        <iframe id="fullAppFrame" class="full-app-frame" src="${attr(url)}" title="${attr(app.label)} – vollständige AI-Sync-App" allow="${attr(allow)}" loading="eager"></iframe>
-      </div>
-      <p class="frame-note">Diese Ansicht verwendet direkt die vollständige AI-Sync-App. Projekte, Aufgaben, Notizen und alle weiteren Module besitzen deshalb denselben Funktionsumfang und denselben Datenstand.</p>
+  function moduleExternalPath(app) {
+    return app.fullPath ? String(app.fullPath).replace(/^\/+/, "") : `index.html#/${app.fullRoute || app.key}`;
+  }
+
+  function moduleSummary(app) {
+    if (app.key === "drive") return [{ label: "Dokumente", value: values(state.driveDocs).filter((doc) => doc.status !== "papierkorb").length }];
+    if (app.key === "smarter") return [{ label: "Lernstoff", value: Object.keys(asMap(state.smarterDocs)).length }];
+    if (app.key === "learning") return [{ label: "Karten fällig", value: dueCards().length }];
+    return [
+      { label: "Offene Aufgaben", value: todayTasks().length },
+      { label: "Projekte", value: collection("projects").length },
+      { label: "Notizen", value: collection("notes").length }
+    ];
+  }
+
+  // Native Modul-Uebersicht fuer AI-Sync-Werkzeuge ohne eigene Tablet-Ansicht.
+  // Statt eine fremde App einzubetten, bleibt der Nutzer in der Tablet-Huelle und
+  // oeffnet die Vollversion bei Bedarf ausdruecklich in einem separaten Fenster.
+  function renderModule(app) {
+    const path = moduleExternalPath(app);
+    const stats = moduleSummary(app);
+    return `<div class="view">
+      ${viewHeader(app.label, "Tabletnative Uebersicht – die Vollversion oeffnet auf Wunsch in einem separaten Fenster.", `<button class="btn" data-action="workspace">✎ Canvas</button><button class="btn primary" data-action="external" data-path="${attr(path)}">↗ In separatem Fenster öffnen</button>`)}
+      ${loginBanner()}
+      <section class="widget span-12 module-card">
+        <div class="module-hero"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><h2>${esc(app.label)}</h2><p class="muted">Dieses Modul nutzt denselben Quantus-Datenstand wie AI Sync. Es wird nicht mehr eingebettet, sondern bleibt eine eigenstaendige Tablet-Ansicht. So kannst du jederzeit frei zu jeder anderen App wechseln.</p></div></div>
+        <div class="metric-row">${stats.map((item) => `<div class="metric"><strong>${esc(item.value)}</strong><small>${esc(item.label)}</small></div>`).join("")}</div>
+        <div class="row-actions" style="margin-top:18px"><button class="btn primary" data-action="external" data-path="${attr(path)}">In separatem Fenster öffnen</button><button class="btn" data-action="apps">Andere App öffnen</button></div>
+      </section>
     </div>`;
   }
 
@@ -766,17 +815,31 @@
     state.route = getRoute();
     viewTitle.textContent = ROUTE_TITLES[state.route] || "Quantus";
     document.querySelectorAll("[data-dock]").forEach((button) => button.classList.toggle("on", button.dataset.dock === state.route));
-    let html;
-    if (FULL_APPS[state.route]) html = renderFullApp(FULL_APPS[state.route]);
-    else if (state.route === "home") html = renderHome();
-    else if (state.route === "apps") html = renderApps();
-    else if (state.route === "workspace") html = window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
-    else if (state.route === "split") html = renderSplit();
-    else if (state.route === "settings") html = renderSettings();
-    else html = renderHome();
-    main.innerHTML = html;
+    main.innerHTML = renderRoute(state.route);
     updateAccountButton();
     window.QuantusTabletWorkspace?.mountRoute?.();
+  }
+
+  // Native Tablet-Navigation. Jede App rendert ihre eigene Ansicht direkt in der
+  // Tablet-Huelle. Es gibt kein eingebettetes AI-Sync-Tabsystem mehr, deshalb
+  // laesst sich jederzeit frei zwischen allen Apps wechseln.
+  function renderRoute(route) {
+    if (route === "workspace") return window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
+    if (route === "home") return renderHome();
+    if (route === "apps") return renderApps();
+    if (route === "split") return renderSplit();
+    if (route === "settings") return renderSettings();
+    if (route === "daily" || route === "dailybriefing") return renderDaily();
+    if (route === "reading") return renderReading();
+    if (route === "learning") return renderLearning();
+    if (route === "habits") return renderHabits();
+    if (route === "budget") return renderBudget();
+    if (route === "polaris") return renderPolaris();
+    if (route === "concepts") return renderConcepts();
+    if (route === "calendar") return renderCalendar();
+    if (COLLECTION_CONFIG[route]) return renderCollectionView(route);
+    if (FULL_APPS[route]) return renderModule(FULL_APPS[route]);
+    return renderHome();
   }
 
   function appBaseUrl() {
@@ -975,11 +1038,6 @@
       state.settings.theme = next; saveJson(LOCAL_KEYS.settings,state.settings); applyTheme(next); return;
     }
     if (action === "workspace") { window.QuantusTabletWorkspace?.open?.(); return; }
-    if (action === "reload-full-app") {
-      const frame = document.getElementById("fullAppFrame");
-      if (frame) frame.src = frame.src;
-      return;
-    }
     if (action === "new-entity") { openEntityForm(button.dataset.collection); return; }
     if (action === "edit-entity") { openEntityForm(button.dataset.collection,button.dataset.id); return; }
     if (action === "delete-entity") {

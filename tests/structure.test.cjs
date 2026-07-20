@@ -26,7 +26,18 @@ for (const route of ["tasks", "projects", "notes", "meetings", "concepts", "goal
 for (const page of ["drive.html", "docstudio.html", "nobraine.html", "bm.html"]) {
   assert.match(app, new RegExp(`fullPath: ["']${page.replace(".", "\\.")}["']`), `missing full AI Sync page ${page}`);
 }
-assert.match(app, /class=\"full-app-frame\"/, "missing embedded full app frame");
+
+// The tablet no longer embeds the AI Sync app in an iframe. Every route renders a
+// native tablet view; full desktop modules only open in a separate window.
+assert.doesNotMatch(app, /full-app-frame|fullAppFrame|renderFullApp/, "AI Sync must not be embedded in an iframe anymore");
+assert.doesNotMatch(html, /<iframe[^>]*full-app/, "index.html must not embed a full app iframe");
+for (const fn of ["renderRoute", "renderModule", "renderCalendar", "renderCollectionView"]) {
+  assert.match(app, new RegExp(`function ${fn}\\b`), `missing native renderer ${fn}`);
+}
+// Native collection routes must be reachable through the router, not an iframe.
+for (const route of ["tasks", "projects", "notes", "meetings", "goals", "strategies", "organizations", "decisions"]) {
+  assert.match(app, new RegExp(`${route}: \\{ label:`), `missing native collection config for ${route}`);
+}
 for (const feature of ["handwriting", "stickyBoard", "externalLinks", "linkedProjects", "uploadFiles", "attachDrive"]) {
   assert.match(workspace, new RegExp(feature), `missing tablet workspace feature ${feature}`);
 }

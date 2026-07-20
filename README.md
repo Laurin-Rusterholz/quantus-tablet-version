@@ -4,19 +4,23 @@ Quantus Tablet ist die touchoptimierte, installierbare Tablet-Oberfläche für
 AI Sync. Die App verwendet dieselben Quantus-Daten wie die bestehende
 Desktop-App und ist als statische PWA für Netlify gebaut.
 
-## Vollstaendiger Funktionsumfang
+## Eigenstaendige Tablet-Oberflaeche
 
-Die Tablet-App bindet alle produktiven AI-Sync-Module direkt in eine
-touchoptimierte Tablet-Huelle ein. Dadurch verwenden Projekte, Aufgaben,
-Noteflow, Meetings, Konzeptor, Ziele, Strategien, Programme, Organisationen,
-Statistiken, Berichte, Polaris und die weiteren Apps exakt den Funktionsumfang
-der Hauptanwendung. Neue Funktionen in AI Sync stehen ohne eine zweite,
-abweichende Implementierung auch auf dem Tablet zur Verfuegung.
+Die Tablet-App ist bewusst als eigenstaendige, touchoptimierte Oberflaeche
+aufgebaut und bettet die AI-Sync-App nicht mehr in einem iframe ein. Jede App
+rendert ihre eigene native Tablet-Ansicht. Dadurch faellt das fremde Tab- und
+Hash-System der Hauptanwendung weg: Sobald eine App geoeffnet ist, laesst sich
+jederzeit frei zu jeder anderen App wechseln.
 
-Der lokale Tablet-Homescreen bleibt als schnelle Tageszentrale bestehen. Von
-dort und aus dem App-Katalog oeffnen die vollstaendigen Module innerhalb der
-Tablet-App. Jedes Modul kann bei Bedarf auch separat in AI Sync geoeffnet
-werden.
+Projekte, Aufgaben, Noteflow, Meetings, Kalender, Konzeptor, Ziele, Strategien,
+Programme, Organisationen, Personen, Ideen und Entscheidungen sind native
+Tablet-Bereiche mit Liste, Suche und Formular. Sie schreiben ueber dieselbe
+Firebase-Transaktion wie AI Sync, verwenden also denselben Datenstand.
+
+AI-Sync-Werkzeuge ohne eigene Tablet-Ansicht (etwa Statistiken, Berichte,
+Quantus Drive, DocStudio oder No-Braine) oeffnen als native Modul-Uebersicht.
+Von dort startet die Vollversion auf Wunsch ausdruecklich in einem separaten
+Fenster – sie uebernimmt nicht mehr die gesamte Tablet-Oberflaeche.
 
 ## Tablet-Funktionen
 
@@ -31,7 +35,8 @@ werden.
   AI-Sync-Anhangsschema
 - Daily Briefing mit Aufgaben, Terminen und Gewohnheiten
 - vollstaendiger AI-Sync-App-Katalog mit mehr als 40 Modulen
-- Projekte, Aufgaben, Meetings, Noteflow und Konzeptor in der AI-Sync-Vollversion
+- Projekte, Aufgaben, Meetings, Kalender, Noteflow und Konzeptor als native
+  Tablet-Bereiche mit gemeinsamer AI-Sync-Datenbasis
 - Quantus-Drive-Leseansicht inklusive PDF-/Dokumentvorschau
 - Textauswahl mit Übersetzung, Polaris-Übergabe und Karteikarten-Erstellung
 - Flashcards und Smarter-Lernstoff
