@@ -1,4 +1,4 @@
-const CACHE = "quantus-tablet-v1";
+const CACHE = "quantus-tablet-v2-full-apps";
 const SHELL = ["/", "/index.html", "/styles.css", "/sync-core.js", "/app.js", "/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
