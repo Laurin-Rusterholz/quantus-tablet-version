@@ -125,6 +125,14 @@
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
+  // Inhalts-Routen, die zusaetzlich eine schnelle native Tablet-Ansicht besitzen.
+  // Fuer sie bietet der Vollmodus einen Umschalter auf die native Schnellansicht.
+  const NATIVE_CONTENT = new Set([
+    "daily", "dailybriefing", "reading", "learning", "habits", "budget", "polaris",
+    "concepts", "calendar", "statistics", "reports", "dashboard", "drive", "smarter",
+    ...Object.keys(COLLECTION_CONFIG)
+  ]);
+
   const state = {
     route: "home",
     payload: Core.makeEmptyPayload(),
@@ -139,7 +147,7 @@
     smarterDocs: {},
     selectedDocId: null,
     pending: loadJson(LOCAL_KEYS.pending, []),
-    settings: loadJson(LOCAL_KEYS.settings, { aiSyncUrl: DEFAULT_AI_SYNC_URL, theme: "dark" }),
+    settings: loadJson(LOCAL_KEYS.settings, { aiSyncUrl: DEFAULT_AI_SYNC_URL, theme: "dark", fullMode: true }),
     deviceId: getDeviceId(),
     search: "",
     splitLeft: "reading",
@@ -745,6 +753,43 @@
     return app.fullPath ? String(app.fullPath).replace(/^\/+/, "") : `index.html#/${app.fullRoute || app.key}`;
   }
 
+  // Vollmodus: die echte Quantus-App im eingebauten Tablet-Layout. Nur explizit
+  // abgeschaltet (false) gilt als aus, damit bestehende Einstellungen anbleiben.
+  function fullModeOn() { return state.settings.fullMode !== false; }
+
+  function fullAppUrl(app) {
+    const base = appBaseUrl();
+    if (app.fullPath) return new URL(String(app.fullPath).replace(/^\/+/, ""), `${base}/`).toString();
+    const url = new URL(`${base}/`);
+    url.searchParams.set("tablet", "1");
+    url.hash = `/${app.fullRoute || app.key}`;
+    return url.toString();
+  }
+
+  // Eingebettete Vollversion in einer festen Tablet-Huelle. Topbar und Dock
+  // bleiben fixiert und immer bedienbar – man wird nie in einer App eingesperrt.
+  // Ein Umschalter fuehrt jederzeit zurueck zur schnellen nativen Tablet-Ansicht.
+  function renderEmbeddedApp(app) {
+    const url = fullAppUrl(app);
+    const allow = app.allow || "clipboard-read; clipboard-write";
+    const nativeAvailable = NATIVE_CONTENT.has(app.key);
+    return `<div class="view embed-view">
+      <div class="embed-toolbar">
+        <div class="embed-identity"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><span class="eyebrow">Quantus · Vollversion</span><h1>${esc(app.label)}</h1></div></div>
+        <div class="head-actions">
+          ${nativeAvailable ? `<button class="btn" data-action="toggle-fullmode">◱ Schnellansicht</button>` : ""}
+          <button class="btn" data-action="workspace">✎ Handschrift</button>
+          <button class="btn" data-action="reload-embed">↻</button>
+          <button class="btn primary" data-action="external-url" data-url="${attr(url)}">↗ Separat</button>
+        </div>
+      </div>
+      <div class="embed-shell">
+        <div class="embed-loading"><span class="status-dot syncing"></span><strong>${esc(app.label)} wird geladen …</strong><span class="muted small">Melde dich einmalig mit demselben Google-Konto an.</span></div>
+        <iframe id="embedFrame" class="embed-frame" src="${attr(url)}" title="${attr(app.label)} – Quantus Vollversion" allow="${attr(allow)}" loading="eager"></iframe>
+      </div>
+    </div>`;
+  }
+
   // Kleine Statistik-Helfer fuer die nativen Analyse-Ansichten.
   function countBy(list, fn) {
     const map = {};
@@ -927,7 +972,7 @@
   function renderSettings() {
     return `<div class="view">${viewHeader("Einstellungen", "Verbindung, Darstellung und Installation der Tablet-App.", "")}
       <div class="dashboard-grid"><section class="widget span-6"><div class="widget-head"><span class="widget-icon">↔</span><h2>Synchronisation</h2></div><div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Konto</small><strong>${esc(state.user ? (state.user.email || state.user.displayName) : "Nicht angemeldet")}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Offline-Warteschlange</small><strong>${state.pending.length} Änderung(en)</strong></div></div><div class="row-actions" style="margin-top:14px">${state.user ? `<button class="btn" data-action="flush-sync">Jetzt synchronisieren</button><button class="btn danger" data-action="sign-out">Abmelden</button>` : `<button class="btn primary" data-action="sign-in">Mit Google anmelden</button>`}</div></section>
-      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
+      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>App-Ansicht</label><select name="fullMode"><option value="full" ${fullModeOn()?"selected":""}>Vollmodus – komplette Quantus-App (Tablet-Layout)</option><option value="native" ${fullModeOn()?"":"selected"}>Schnellansicht – native Tablet-Oberfläche</option></select></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
       <section class="widget span-12"><div class="widget-head"><span class="widget-icon">＋</span><h2>Als App installieren</h2></div><p class="muted">Öffne im Browser das Teilen-Menü und wähle „Zum Home-Bildschirm“. Danach startet Quantus Tablet ohne Browserleiste wie eine normale App.</p></section></div></div>`;
   }
 
@@ -944,11 +989,16 @@
   // Tablet-Huelle. Es gibt kein eingebettetes AI-Sync-Tabsystem mehr, deshalb
   // laesst sich jederzeit frei zwischen allen Apps wechseln.
   function renderRoute(route) {
+    // Immer native Tablet-Oberflaeche (Huelle, Werkzeuge des Tablets selbst):
     if (route === "workspace") return window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
     if (route === "home") return renderHome();
     if (route === "apps") return renderApps();
     if (route === "split") return renderSplit();
     if (route === "settings") return renderSettings();
+    // Vollmodus: Inhalts-Apps zeigen die echte Quantus-App im Tablet-Layout,
+    // damit der Funktionsumfang identisch zu Quantus ist. Der Umschalter in der
+    // Werkzeugleiste oder in den Einstellungen wechselt zur nativen Schnellansicht.
+    if (fullModeOn() && FULL_APPS[route]) return renderEmbeddedApp(FULL_APPS[route]);
     if (route === "daily" || route === "dailybriefing") return renderDaily();
     if (route === "reading") return renderReading();
     if (route === "learning") return renderLearning();
@@ -1125,6 +1175,7 @@
     } else if (type === "settings") {
       state.settings.aiSyncUrl = String(data.get("aiSyncUrl")||DEFAULT_AI_SYNC_URL).replace(/\/+$/,"");
       state.settings.theme = String(data.get("theme")||"dark");
+      state.settings.fullMode = String(data.get("fullMode")||"full") !== "native";
       saveJson(LOCAL_KEYS.settings,state.settings);
       applyTheme(state.settings.theme);
       toast("Einstellungen gespeichert", "Die Tablet-App wurde aktualisiert.", "ok");
@@ -1163,6 +1214,14 @@
       state.settings.theme = next; saveJson(LOCAL_KEYS.settings,state.settings); applyTheme(next); return;
     }
     if (action === "workspace") { window.QuantusTabletWorkspace?.open?.(); return; }
+    if (action === "toggle-fullmode") {
+      state.settings.fullMode = !fullModeOn();
+      saveJson(LOCAL_KEYS.settings, state.settings);
+      toast(state.settings.fullMode ? "Vollmodus" : "Schnellansicht", state.settings.fullMode ? "Zeigt die vollständige Quantus-App im Tablet-Layout." : "Zeigt die schnelle native Tablet-Ansicht.", "ok");
+      render();
+      return;
+    }
+    if (action === "reload-embed") { const frame = document.getElementById("embedFrame"); if (frame) frame.src = frame.src; return; }
     if (action === "new-entity") { openEntityForm(button.dataset.collection); return; }
     if (action === "edit-entity") { openEntityForm(button.dataset.collection,button.dataset.id); return; }
     if (action === "delete-entity") {

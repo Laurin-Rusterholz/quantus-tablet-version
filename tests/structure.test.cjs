@@ -27,16 +27,23 @@ for (const page of ["drive.html", "docstudio.html", "nobraine.html", "bm.html"])
   assert.match(app, new RegExp(`fullPath: ["']${page.replace(".", "\\.")}["']`), `missing full AI Sync page ${page}`);
 }
 
-// The tablet no longer embeds the AI Sync app in an iframe. Every route renders a
-// native tablet view; full desktop modules only open in a separate window.
-assert.doesNotMatch(app, /full-app-frame|fullAppFrame|renderFullApp/, "AI Sync must not be embedded in an iframe anymore");
-assert.doesNotMatch(html, /<iframe[^>]*full-app/, "index.html must not embed a full app iframe");
+// Native tablet renderers exist for a fast, touch-first view of every area.
 for (const fn of ["renderRoute", "renderModule", "renderCalendar", "renderCollectionView", "renderStatistics", "renderReports", "moduleList"]) {
   assert.match(app, new RegExp(`function ${fn}\\b`), `missing native renderer ${fn}`);
 }
-// Module pages must surface real data, not just an "open externally" placeholder.
+// Native module pages surface real data, not just an "open externally" placeholder.
 assert.match(app, /MODULE_COLLECTIONS/, "modules should map to real collections");
 assert.match(app, /recentActivity/, "modules should show recent activity from the payload");
+
+// Vollmodus embeds the full Quantus app in its tablet layout, inside a fixed
+// tablet shell (persistent topbar + dock) with a toggle back to the native view.
+assert.match(app, /function renderEmbeddedApp\b/, "missing embedded full-app (Vollmodus) renderer");
+assert.match(app, /function fullAppUrl\b/, "missing full app deep-link builder");
+assert.match(app, /tablet["']?,\s*["']1["']|set\(["']tablet["'], ["']1["']\)/, "embedded app must request the Quantus tablet layout (?tablet=1)");
+assert.match(app, /toggle-fullmode/, "missing Vollmodus/Schnellansicht toggle");
+assert.match(app, /class="embed-frame"/, "missing embedded app frame");
+assert.match(html, /class="dock"/, "the fixed tablet dock must stay in the shell so apps never trap the user");
+
 // Enhanced handwriting: marker/highlighter mode and colour presets.
 assert.match(workspace, /highlighter/, "missing highlighter/marker handwriting mode");
 assert.match(workspace, /INK_COLORS/, "missing handwriting colour presets");
