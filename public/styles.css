@@ -170,6 +170,15 @@ a { color:var(--accent); }
 .module-hero h2 { margin:0 0 4px; font:700 clamp(22px,3vw,30px)/1.05 Georgia,serif; }
 .module-hero p { margin:0; max-width:70ch; }
 
+.stat-bar-row { display:flex; align-items:center; gap:12px; margin:9px 0; }
+.stat-bar-label { flex:0 0 128px; color:var(--text2); font-size:13px; font-weight:600; }
+.stat-bar { flex:1; height:14px; border-radius:999px; background:var(--surface-overlay); border:1px solid var(--border); overflow:hidden; }
+.stat-bar i { display:block; height:100%; border-radius:999px; background:var(--muted); transition:width .3s ease; }
+.stat-bar i.accent { background:var(--accent); }
+.stat-bar i.blue { background:var(--blue); }
+.stat-bar i.coral { background:var(--coral); }
+.stat-bar-row > strong { flex:0 0 auto; min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+
 .content-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:13px; }
 .entity-card { border:1px solid var(--border); background:var(--surface-raised); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow-soft); display:flex; flex-direction:column; gap:10px; min-height:150px; }
 .entity-card:hover { border-color:var(--border2); }

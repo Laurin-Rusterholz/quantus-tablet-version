@@ -38,6 +38,9 @@
   ];
 
   const POSTIT_COLORS = ["#ffe082", "#ffab91", "#a5d6a7", "#90caf9", "#ce93d8", "#f5f5f5"];
+  // Schnellzugriff-Stiftfarben und Markerfarben fuer die Handschrift.
+  const INK_COLORS = ["#243c34", "#111417", "#1f6feb", "#d64545", "#2ea27b", "#b8860b"];
+  const MARKER_COLORS = ["#ffe14d", "#7ee7c7", "#8bc6ff", "#ffa8a8", "#d7a8ff"];
   const ui = {
     open: false,
     tab: "ink",
@@ -46,6 +49,8 @@
     inkColor: "#243c34",
     inkWidth: 4,
     eraser: false,
+    highlighter: false,
+    markerColor: MARKER_COLORS[0],
     boardColor: POSTIT_COLORS[0],
     connectFrom: null,
     boardDraw: false,
@@ -116,17 +121,23 @@
 
   function inkPanel(entity) {
     const count = asArray(entity.handwriting?.strokes).length;
+    const activeColor = ui.highlighter ? ui.markerColor : ui.inkColor;
+    const swatches = (ui.highlighter ? MARKER_COLORS : INK_COLORS)
+      .map((color) => `<button style="--swatch:${color}" class="${color.toLowerCase() === activeColor.toLowerCase() ? "on" : ""}" data-tw-action="ink-preset" data-color="${attr(color)}" aria-label="Farbe"></button>`).join("");
     return `<section class="tw-panel tw-ink-panel">
       <div class="tw-toolrow">
-        <label class="tw-color"><span>Stift</span><input type="color" value="${attr(ui.inkColor)}" data-tw-change="ink-color"></label>
-        <label class="tw-range"><span>Dicke</span><input type="range" min="1" max="18" value="${ui.inkWidth}" data-tw-change="ink-width"></label>
+        <button class="tw-btn ${ui.highlighter ? "" : "active"}" data-tw-action="pen-mode">✎ Stift</button>
+        <button class="tw-btn ${ui.highlighter ? "active" : ""}" data-tw-action="marker-mode">▔ Marker</button>
+        <div class="tw-swatches tw-ink-presets">${swatches}</div>
+        <label class="tw-color"><span>Farbe</span><input type="color" value="${attr(activeColor)}" data-tw-change="ink-color"></label>
+        <label class="tw-range"><span>Dicke</span><input type="range" min="1" max="24" value="${ui.inkWidth}" data-tw-change="ink-width"></label>
         <button class="tw-btn ${ui.eraser ? "active" : ""}" data-tw-action="eraser">⌫ Radierer</button>
         <button class="tw-btn" data-tw-action="ink-undo" ${count ? "" : "disabled"}>↶ Rückgängig</button>
         <button class="tw-btn danger" data-tw-action="ink-clear" ${count ? "" : "disabled"}>Leeren</button>
         <button class="tw-btn" data-tw-action="ink-copy-note" ${count ? "" : "disabled"}>Als Notiz kopieren</button>
         <span class="tw-save-state">${count} Striche · automatisch synchronisiert</span>
       </div>
-      <div class="tw-paper"><canvas id="twInkCanvas" aria-label="Handschriftliche Notizfläche"></canvas><div class="tw-paper-hint">Mit Apple Pencil, Stift, Finger oder Maus schreiben</div></div>
+      <div class="tw-paper"><canvas id="twInkCanvas" aria-label="Handschriftliche Notizfläche"></canvas><div class="tw-paper-hint">${ui.highlighter ? "Marker – breit und halbtransparent zum Hervorheben" : "Mit Apple Pencil, Stift, Finger oder Maus schreiben"}</div></div>
     </section>`;
   }
 
@@ -295,7 +306,11 @@
       saveDrawings(mode, next); drawCanvas(canvas, next, mode); return;
     }
     activePointerId = event.pointerId;
-    activeStroke = { id: makeId("stroke"), color: ui.inkColor, width: Number(ui.inkWidth), points: [point] };
+    const highlighter = mode === "handwriting" && ui.highlighter;
+    const color = highlighter ? ui.markerColor : ui.inkColor;
+    const width = highlighter ? Math.max(16, Number(ui.inkWidth) * 3) : Number(ui.inkWidth);
+    activeStroke = { id: makeId("stroke"), color, width, points: [point] };
+    if (highlighter) activeStroke.highlighter = true;
     strokes.push(activeStroke); canvas.dataset.strokes = JSON.stringify(strokes);
   }
 
@@ -320,10 +335,19 @@
     const sy = mode === "handwriting" ? canvas.height : canvas.height / 1000;
     asArray(strokes).forEach((stroke) => {
       const points = asArray(stroke.points); if (points.length < 1) return;
-      context.beginPath(); context.lineCap = "round"; context.lineJoin = "round";
+      context.save();
+      context.beginPath(); context.lineJoin = "round";
       context.strokeStyle = stroke.color || "#243c34";
+      if (stroke.highlighter) {
+        context.lineCap = "butt";
+        context.globalAlpha = .34;
+        context.globalCompositeOperation = "multiply";
+      } else {
+        context.lineCap = "round";
+      }
       const averagePressure = points.reduce((sum, point) => sum + (Number(point.p) || .5), 0) / points.length;
-      context.lineWidth = (Number(stroke.width) || 4) * (.72 + averagePressure * .56) * (mode === "handwriting" ? Math.min(canvas.width, canvas.height) / 700 : sx);
+      const pressureFactor = stroke.highlighter ? 1 : (.72 + averagePressure * .56);
+      context.lineWidth = (Number(stroke.width) || 4) * pressureFactor * (mode === "handwriting" ? Math.min(canvas.width, canvas.height) / 700 : sx);
       context.moveTo(points[0].x * sx, points[0].y * sy);
       for (let index = 1; index < points.length - 1; index += 1) {
         const point = points[index], next = points[index + 1];
@@ -331,6 +355,7 @@
       }
       if (points.length > 1) context.lineTo(points[points.length - 1].x * sx, points[points.length - 1].y * sy);
       context.stroke();
+      context.restore();
     });
   }
 
@@ -452,6 +477,13 @@
     if (action === "tab") { ui.tab = button.dataset.tab; return renderOverlay(); }
     if (action === "new-context-note") return createContextNote();
     if (action === "eraser") { ui.eraser = !ui.eraser; return renderOverlay(); }
+    if (action === "pen-mode") { ui.highlighter = false; ui.eraser = false; return renderOverlay(); }
+    if (action === "marker-mode") { ui.highlighter = true; ui.eraser = false; return renderOverlay(); }
+    if (action === "ink-preset") {
+      const color = button.dataset.color; ui.eraser = false;
+      if (ui.highlighter) ui.markerColor = color; else ui.inkColor = color;
+      return renderOverlay();
+    }
     if (action === "ink-undo" || action === "ink-clear") {
       const entity = currentEntity(); if (!entity) return;
       let strokes = asArray(entity.handwriting?.strokes).slice();
@@ -500,7 +532,7 @@
     const change = control.dataset.twChange;
     if (change === "collection") { ui.collection = control.value; ui.entityId = ""; return renderOverlay(); }
     if (change === "entity") { ui.entityId = control.value; return renderOverlay(); }
-    if (change === "ink-color") { ui.inkColor = control.value; return; }
+    if (change === "ink-color") { if (ui.highlighter) ui.markerColor = control.value; else ui.inkColor = control.value; return; }
     if (change === "ink-width") { ui.inkWidth = Number(control.value); return; }
     if (change === "relation-collection") { ui.relationCollection = control.value; return renderOverlay(); }
     if (change === "sticky-text") {
