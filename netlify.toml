@@ -1,6 +1,12 @@
 [build]
   publish = "public"
 
+[build.environment]
+  # Firebase Web API keys identify a Firebase project in client apps and are
+  # intentionally public. Keep Netlify secret scanning enabled, but safelist
+  # this verified false positive so deploys do not fail.
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIzaSyC6xVo-wmXC4JjG7qMQnOExIjU-UDvBluE"
+
 [[headers]]
   for = "/*"
   [headers.values]
