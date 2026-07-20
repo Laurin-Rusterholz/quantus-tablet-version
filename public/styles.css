@@ -91,7 +91,7 @@ a { color:var(--accent); }
 
 .dock {
   position:fixed; z-index:45; left:50%; bottom:calc(10px + var(--safe-bottom)); transform:translateX(-50%);
-  width:min(760px,calc(100vw - 24px)); height:72px; padding:7px 10px; display:grid; grid-template-columns:repeat(7,1fr); gap:3px;
+  width:min(850px,calc(100vw - 24px)); height:72px; padding:7px 10px; display:grid; grid-template-columns:repeat(8,1fr); gap:3px;
   background:color-mix(in oklab,var(--surface-overlay) 88%,transparent); border:1px solid var(--border2); border-radius:23px;
   box-shadow:var(--shadow); backdrop-filter:blur(22px) saturate(130%); -webkit-backdrop-filter:blur(22px) saturate(130%);
 }
@@ -279,7 +279,7 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
   .view-head h1 { font-size:30px; }
   .dashboard-grid { grid-template-columns:1fr; }
   .widget.span-3,.widget.span-4,.widget.span-5,.widget.span-6,.widget.span-7,.widget.span-8,.widget.span-12 { grid-column:1; }
-  .dock { grid-template-columns:repeat(6,1fr); bottom:calc(6px + var(--safe-bottom)); height:68px; padding:5px; }
+  .dock { grid-template-columns:repeat(7,1fr); bottom:calc(6px + var(--safe-bottom)); height:68px; padding:5px; }
   .dock button:nth-child(2) { display:none; }
   .dock button small { font-size:8.5px; }
   .dock button span { font-size:20px; }
@@ -295,7 +295,7 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
   .overlay { padding:0; }
   .sheet { border-radius:24px 24px 0 0; max-height:92vh; padding:17px; }
   .full-app-toolbar { align-items:flex-start; }
-  .full-app-toolbar .head-actions .btn:first-child { display:none; }
+  .full-app-toolbar .head-actions .reload-full-app { display:none; }
   .full-app-frame-shell { height:calc(100vh - var(--topbar) - var(--dock) - 105px); min-height:520px; border-radius:16px; }
   .frame-note { display:none; }
 }

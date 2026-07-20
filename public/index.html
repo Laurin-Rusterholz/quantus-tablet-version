@@ -11,6 +11,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="tablet-workspace.css">
   <script>
     (function () {
       try {
@@ -38,6 +39,7 @@
           <span id="syncLabel" class="hide-small">Offline</span>
         </button>
         <button class="icon-button" data-action="search" aria-label="Quantus durchsuchen">⌕</button>
+        <button class="icon-button ink-button" data-action="workspace" aria-label="Handschrift, Sticky Board und Anhänge öffnen">✎</button>
         <button class="icon-button" data-action="theme" aria-label="Darstellung wechseln">◐</button>
         <button class="account-button" id="accountButton" data-action="account" aria-label="Konto">LR</button>
       </div>
@@ -52,17 +54,21 @@
       <button class="polaris-dock" data-action="polaris"><span class="orb-mini"></span><small>Polaris</small></button>
       <button data-action="go" data-route="notes" data-dock="notes"><span>✎</span><small>Noteflow</small></button>
       <button data-action="go" data-route="tasks" data-dock="tasks"><span>✓</span><small>Aufgaben</small></button>
+      <button data-action="go" data-route="workspace" data-dock="workspace"><span>✎</span><small>Canvas</small></button>
       <button data-action="apps"><span>▦</span><small>Apps</small></button>
     </nav>
   </div>
 
   <div id="overlayRoot"></div>
+  <div id="tabletWorkspaceRoot"></div>
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
   <script src="sync-core.js"></script>
+  <script src="tablet-workspace.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

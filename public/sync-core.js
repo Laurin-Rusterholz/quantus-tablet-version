@@ -16,7 +16,13 @@
     ideas: "idea",
     strategies: "strategy",
     goals: "goal",
-    decisions: "decision"
+    decisions: "decision",
+    organizations: "organization",
+    programs: "program",
+    articles: "article",
+    protocols: "protocol",
+    workflows: "workflow",
+    theses: "thesis"
   };
 
   function clone(value) {
@@ -43,6 +49,17 @@
         meetings: {},
         calendarEvents: {},
         concepts: {},
+        strategies: {},
+        goals: {},
+        programs: {},
+        organizations: {},
+        persons: {},
+        ideas: {},
+        decisions: {},
+        articles: {},
+        protocols: {},
+        workflows: {},
+        theses: {},
         transactions: {},
         accounts: {}
       },
@@ -55,7 +72,7 @@
   function normalisePayload(input) {
     const payload = isObject(input) ? clone(input) : makeEmptyPayload();
     if (!isObject(payload.entities)) payload.entities = {};
-    ["tasks", "projects", "notes", "meetings", "calendarEvents", "concepts", "transactions", "accounts"]
+    ["tasks", "projects", "notes", "meetings", "calendarEvents", "concepts", "strategies", "goals", "programs", "organizations", "persons", "ideas", "decisions", "articles", "protocols", "workflows", "theses", "transactions", "accounts"]
       .forEach((key) => { if (!isObject(payload.entities[key])) payload.entities[key] = {}; });
     if (!isObject(payload.dailyBriefing)) payload.dailyBriefing = {};
     if (!Array.isArray(payload.dailyBriefing.routines)) payload.dailyBriefing.routines = [];

@@ -86,4 +86,25 @@ function op(overrides = {}) {
   assert.equal(JSON.parse(wrapper.data).entities.tasks.constructor, Object);
 }
 
-console.log("sync-core: 8 tests passed");
+{
+  const payload = core.makeEmptyPayload();
+  payload.entities.projects.p1 = { id: "p1", title: "Tablet", updatedAt: "2026-07-20T08:00:00.000Z" };
+  const stickyBoard = {
+    notes: [{ id: "s1", x: 40, y: 60, w: 220, h: 160, text: "Idee", color: "#ffe082" }],
+    connections: [], drawings: [], view: { x: 0, y: 0, zoom: 1 }
+  };
+  const handwriting = { version: 1, strokes: [{ id: "stroke-1", color: "#243c34", width: 4, points: [{ x: .1, y: .2 }] }] };
+  const result = core.applyOperation(payload, op({ collection: "projects", id: "p1", patch: { stickyBoard, handwriting, linkedNotes: ["n1"] } }));
+  assert.equal(result.payload.entities.projects.p1.stickyBoard.notes[0].text, "Idee");
+  assert.equal(result.payload.entities.projects.p1.handwriting.strokes.length, 1);
+  assert.deepEqual(result.payload.entities.projects.p1.linkedNotes, ["n1"]);
+}
+
+{
+  const payload = core.makeEmptyPayload();
+  const result = core.applyOperation(payload, op({ collection: "organizations", id: "o1", patch: { name: "Organisation", files: [{ id: "f1", storagePath: "attachments/organization/o1/test.pdf" }] } }));
+  assert.equal(result.payload.entities.organizations.o1.files[0].id, "f1");
+  assert.equal(core.toInboxRecord(op({ collection: "organizations", id: "o1" })).type, "organization");
+}
+
+console.log("sync-core: 10 tests passed");

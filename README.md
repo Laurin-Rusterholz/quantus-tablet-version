@@ -21,6 +21,14 @@ werden.
 ## Tablet-Funktionen
 
 - iPad-artiger Homescreen mit Dashboard, Widgets, App-Raster und Dock
+- globales Tablet Canvas in jeder App und über die Hauptnavigation
+- handschriftliche Notizen mit Apple Pencil, Stift, Finger oder Maus
+- AI-Sync-kompatible Sticky Boards direkt an Projekten, Aufgaben, Strategien,
+  Konzepten und weiteren Elementen
+- bidirektionale Verknüpfungen zwischen Quantus-Elementen
+- externe Links sowie Dateien aus Quantus Drive
+- direkter Firebase-Storage-Upload bis 50 MB mit dem bestehenden
+  AI-Sync-Anhangsschema
 - Daily Briefing mit Aufgaben, Terminen und Gewohnheiten
 - vollstaendiger AI-Sync-App-Katalog mit mehr als 40 Modulen
 - Projekte, Aufgaben, Meetings, Noteflow und Konzeptor in der AI-Sync-Vollversion
