@@ -745,6 +745,102 @@
     return app.fullPath ? String(app.fullPath).replace(/^\/+/, "") : `index.html#/${app.fullRoute || app.key}`;
   }
 
+  // Kleine Statistik-Helfer fuer die nativen Analyse-Ansichten.
+  function countBy(list, fn) {
+    const map = {};
+    list.forEach((item) => { const key = fn(item) || "Ohne Status"; map[key] = (map[key] || 0) + 1; });
+    return map;
+  }
+
+  function statusLabel(status) {
+    const value = String(status || "").toLowerCase();
+    if (["done", "completed", "erledigt", "closed"].includes(value)) return "Erledigt";
+    if (["in_progress", "in-arbeit", "doing", "aktiv", "active"].includes(value)) return "In Arbeit";
+    if (["open", "offen", "todo", "neu", ""].includes(value)) return "Offen";
+    return status;
+  }
+
+  function barRow(label, value, max, tone) {
+    const pct = max ? Math.max(2, Math.round((value / max) * 100)) : 0;
+    return `<div class="stat-bar-row"><span class="stat-bar-label">${esc(label)}</span><div class="stat-bar"><i class="${tone || ""}" style="width:${pct}%"></i></div><strong>${esc(value)}</strong></div>`;
+  }
+
+  function recentActivity(limit) {
+    const activity = [];
+    Object.entries(COLLECTION_CONFIG).forEach(([name, config]) => collection(name).forEach((item) => activity.push({ name, config, item })));
+    collection("calendarEvents").forEach((item) => activity.push({ name: "calendarEvents", config: { label: "Termin", icon: "◉" }, item }));
+    return activity
+      .sort((a, b) => Date.parse(b.item.updatedAt || b.item.createdAt || 0) - Date.parse(a.item.updatedAt || a.item.createdAt || 0))
+      .slice(0, limit || 40);
+  }
+
+  // Native Analyse-Ansicht. Rechnet Kennzahlen direkt aus dem geladenen
+  // Quantus-Datenstand – ohne die Desktop-App einzubetten.
+  function renderStatistics() {
+    const tasks = collection("tasks");
+    const doneTasks = tasks.filter(isDone).length;
+    const openTasks = tasks.length - doneTasks;
+    const projects = collection("projects");
+    const goals = collection("goals");
+    const notes = collection("notes");
+    const cards = asArray(state.payload.recallLabData && state.payload.recallLabData.cards);
+    const budget = budgetData();
+    const taskStatus = { Offen: openTasks, Erledigt: doneTasks };
+    const maxTask = Math.max(1, ...Object.values(taskStatus));
+    const projByStatus = countBy(projects, (project) => statusLabel(project.status));
+    const maxProj = Math.max(1, ...Object.values(projByStatus));
+    const budgetMax = Math.max(1, budget.income, budget.expense);
+    const completion = tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0;
+    return `<div class="view">
+      ${viewHeader("Statistiken", "Kennzahlen aus deinem gesamten Quantus-Datenstand – tabletnativ berechnet.", `<button class="btn primary" data-action="external" data-path="index.html#/statistics">↗ Vollversion</button>`)}
+      ${loginBanner()}
+      <div class="budget-metrics">
+        <div class="budget-metric"><small>Aufgaben erledigt</small><strong>${completion}%</strong></div>
+        <div class="budget-metric"><small>Offene Aufgaben</small><strong>${openTasks}</strong></div>
+        <div class="budget-metric"><small>Projekte</small><strong>${projects.length}</strong></div>
+        <div class="budget-metric"><small>Ziele</small><strong>${goals.length}</strong></div>
+        <div class="budget-metric"><small>Notizen</small><strong>${notes.length}</strong></div>
+        <div class="budget-metric"><small>Karteikarten</small><strong>${cards.length}</strong></div>
+      </div>
+      <div class="dashboard-grid">
+        <section class="widget span-6"><div class="widget-head"><span class="widget-icon">✓</span><h2>Aufgaben nach Status</h2></div>${Object.entries(taskStatus).map(([label, value]) => barRow(label, value, maxTask, "accent")).join("") || emptyMini("Keine Aufgaben")}</section>
+        <section class="widget span-6"><div class="widget-head"><span class="widget-icon">▧</span><h2>Projekte nach Status</h2></div>${Object.entries(projByStatus).map(([label, value]) => barRow(label, value, maxProj, "blue")).join("") || emptyMini("Keine Projekte")}</section>
+        <section class="widget span-6"><div class="widget-head"><span class="widget-icon">◎</span><h2>Aufgabenfortschritt</h2></div><div class="progress"><i style="width:${completion}%"></i></div><p class="muted" style="margin-top:10px">${doneTasks} von ${tasks.length} Aufgaben erledigt</p></section>
+        <section class="widget span-6"><div class="widget-head"><span class="widget-icon">₣</span><h2>Budget diesen Monat</h2></div>${barRow("Einnahmen", Math.round(budget.income), budgetMax, "accent")}${barRow("Ausgaben", Math.round(budget.expense), budgetMax, "coral")}<p class="muted small" style="margin-top:8px">Saldo ${money(budget.income - budget.expense, budget.currency)}</p></section>
+      </div>
+    </div>`;
+  }
+
+  // Native Berichtsansicht: Bestand und juengste Aktivitaet ueber alle Bereiche.
+  function renderReports() {
+    const activity = recentActivity(40);
+    const perType = countBy(activity, (entry) => entry.config.label);
+    return `<div class="view">
+      ${viewHeader("Berichte", "Aktueller Bestand und die juengsten Aktualisierungen über alle Quantus-Bereiche.", `<button class="btn primary" data-action="external" data-path="index.html#/reports">↗ Vollversion</button>`)}
+      ${loginBanner()}
+      <div class="budget-metrics">${Object.entries(perType).slice(0, 6).map(([label, value]) => `<div class="budget-metric"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`).join("") || `<div class="budget-metric"><small>Einträge</small><strong>0</strong></div>`}</div>
+      <section class="widget"><div class="widget-head"><span class="widget-icon">↻</span><h2>Letzte Aktualisierungen</h2></div><div class="item-list">${activity.map(({ config, item }) => `<div class="list-item"><span class="badge accent">${esc(config.label)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Aktivität – melde dich an, um deine Quantus-Daten zu laden.")}</div></section>
+    </div>`;
+  }
+
+  // Welche echten Inhalte ein Modul ohne eigene Vollansicht nativ zeigt.
+  const MODULE_COLLECTIONS = {
+    knowledge: ["notes", "articles"],
+    journal: ["notes"],
+    reflecta: ["notes"],
+    briefings: ["notes"],
+    updates: ["notes"],
+    messages: ["messages", "persons"],
+    gmail: ["messages", "persons"],
+    time: ["tasks", "projects"],
+    workload: ["tasks", "projects"],
+    weekplanning: ["tasks", "projects"],
+    quantusproject: ["projects", "tasks"],
+    googlecalendar: ["calendarEvents", "meetings"],
+    measures: ["decisions", "tasks"],
+    thesis: ["theses", "notes"]
+  };
+
   function moduleSummary(app) {
     if (app.key === "drive") return [{ label: "Dokumente", value: values(state.driveDocs).filter((doc) => doc.status !== "papierkorb").length }];
     if (app.key === "smarter") return [{ label: "Lernstoff", value: Object.keys(asMap(state.smarterDocs)).length }];
@@ -756,20 +852,44 @@
     ];
   }
 
+  // Anzeigenamen fuer Sammlungen, die keine eigene Tablet-Route haben.
+  const ENTITY_LABELS = {
+    articles: { label: "Artikel", plural: "Artikel", icon: "▤" },
+    theses: { label: "These", plural: "Thesen", icon: "T" },
+    messages: { label: "Nachricht", plural: "Nachrichten", icon: "✉" },
+    calendarEvents: { label: "Termin", plural: "Termine", icon: "◉" }
+  };
+
+  // Kompakte, tabletnative Liste einer Sammlung fuer die Modul-Uebersicht.
+  function moduleList(name) {
+    const config = COLLECTION_CONFIG[name] || ENTITY_LABELS[name] || { label: name, plural: name, icon: "•", route: name };
+    const editable = Boolean(COLLECTION_CONFIG[name]);
+    const list = collection(name).slice(0, 8);
+    return `<section class="widget span-6"><div class="widget-head"><span class="widget-icon">${esc(config.icon)}</span><h2>${esc(config.plural || config.label)}</h2>${editable ? `<button data-action="go" data-route="${attr(config.route)}">Öffnen</button>` : ""}</div><div class="item-list">${list.map((item) => `<div class="list-item" ${editable ? `data-action="edit-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}"` : ""}><span>${esc(config.icon)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(itemText(item).slice(0, 70)) || esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Einträge")}</div></section>`;
+  }
+
   // Native Modul-Uebersicht fuer AI-Sync-Werkzeuge ohne eigene Tablet-Ansicht.
-  // Statt eine fremde App einzubetten, bleibt der Nutzer in der Tablet-Huelle und
-  // oeffnet die Vollversion bei Bedarf ausdruecklich in einem separaten Fenster.
+  // Zeigt echte Inhalte aus dem geladenen Quantus-Datenstand; die Desktop-
+  // Vollversion oeffnet auf Wunsch in einem separaten Fenster.
   function renderModule(app) {
     const path = moduleExternalPath(app);
+    const cols = MODULE_COLLECTIONS[app.key];
+    const primary = Array.isArray(cols) ? cols.find((name) => COLLECTION_CONFIG[name]) : null;
+    const head = viewHeader(app.label, "Tabletnative Ansicht mit deinen echten Quantus-Inhalten – die Vollversion öffnet auf Wunsch separat.", `${primary ? `<button class="btn" data-action="new-entity" data-collection="${attr(primary)}">＋ ${esc(COLLECTION_CONFIG[primary].label)}</button>` : ""}<button class="btn" data-action="workspace">✎ Canvas</button><button class="btn primary" data-action="external" data-path="${attr(path)}">↗ Separat öffnen</button>`);
+    if (Array.isArray(cols) && cols.length) {
+      return `<div class="view">${head}${loginBanner()}<div class="dashboard-grid">${cols.map(moduleList).join("")}</div></div>`;
+    }
+    // Werkzeug ohne eigene Datensammlung: kurze Beschreibung, echte Kennzahlen
+    // und die juengste Aktivitaet, damit die Seite nie leer wirkt.
     const stats = moduleSummary(app);
-    return `<div class="view">
-      ${viewHeader(app.label, "Tabletnative Uebersicht – die Vollversion oeffnet auf Wunsch in einem separaten Fenster.", `<button class="btn" data-action="workspace">✎ Canvas</button><button class="btn primary" data-action="external" data-path="${attr(path)}">↗ In separatem Fenster öffnen</button>`)}
-      ${loginBanner()}
+    const recent = recentActivity(6);
+    return `<div class="view">${head}${loginBanner()}
       <section class="widget span-12 module-card">
-        <div class="module-hero"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><h2>${esc(app.label)}</h2><p class="muted">Dieses Modul nutzt denselben Quantus-Datenstand wie AI Sync. Es wird nicht mehr eingebettet, sondern bleibt eine eigenstaendige Tablet-Ansicht. So kannst du jederzeit frei zu jeder anderen App wechseln.</p></div></div>
+        <div class="module-hero"><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><div><h2>${esc(app.label)}</h2><p class="muted">Dieses Werkzeug bleibt eine eigenständige Tablet-Ansicht und nutzt denselben Quantus-Datenstand wie AI Sync. Für die vollständige Desktop-Bedienung öffnet es auf Wunsch in einem separaten Fenster – du wirst nie in einer App eingesperrt.</p></div></div>
         <div class="metric-row">${stats.map((item) => `<div class="metric"><strong>${esc(item.value)}</strong><small>${esc(item.label)}</small></div>`).join("")}</div>
-        <div class="row-actions" style="margin-top:18px"><button class="btn primary" data-action="external" data-path="${attr(path)}">In separatem Fenster öffnen</button><button class="btn" data-action="apps">Andere App öffnen</button></div>
+        <div class="row-actions" style="margin-top:16px"><button class="btn primary" data-action="external" data-path="${attr(path)}">In separatem Fenster öffnen</button><button class="btn" data-action="apps">Andere App öffnen</button></div>
       </section>
+      <section class="widget span-12"><div class="widget-head"><span class="widget-icon">↻</span><h2>Zuletzt in Quantus</h2></div><div class="item-list">${recent.map(({ config, item }) => `<div class="list-item"><span class="badge accent">${esc(config.label)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Aktivität")}</div></section>
     </div>`;
   }
 
@@ -837,6 +957,11 @@
     if (route === "polaris") return renderPolaris();
     if (route === "concepts") return renderConcepts();
     if (route === "calendar") return renderCalendar();
+    if (route === "statistics") return renderStatistics();
+    if (route === "reports") return renderReports();
+    if (route === "dashboard") return renderHome();
+    if (route === "drive") return renderReading();
+    if (route === "smarter") return renderLearning();
     if (COLLECTION_CONFIG[route]) return renderCollectionView(route);
     if (FULL_APPS[route]) return renderModule(FULL_APPS[route]);
     return renderHome();

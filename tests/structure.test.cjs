@@ -31,9 +31,15 @@ for (const page of ["drive.html", "docstudio.html", "nobraine.html", "bm.html"])
 // native tablet view; full desktop modules only open in a separate window.
 assert.doesNotMatch(app, /full-app-frame|fullAppFrame|renderFullApp/, "AI Sync must not be embedded in an iframe anymore");
 assert.doesNotMatch(html, /<iframe[^>]*full-app/, "index.html must not embed a full app iframe");
-for (const fn of ["renderRoute", "renderModule", "renderCalendar", "renderCollectionView"]) {
+for (const fn of ["renderRoute", "renderModule", "renderCalendar", "renderCollectionView", "renderStatistics", "renderReports", "moduleList"]) {
   assert.match(app, new RegExp(`function ${fn}\\b`), `missing native renderer ${fn}`);
 }
+// Module pages must surface real data, not just an "open externally" placeholder.
+assert.match(app, /MODULE_COLLECTIONS/, "modules should map to real collections");
+assert.match(app, /recentActivity/, "modules should show recent activity from the payload");
+// Enhanced handwriting: marker/highlighter mode and colour presets.
+assert.match(workspace, /highlighter/, "missing highlighter/marker handwriting mode");
+assert.match(workspace, /INK_COLORS/, "missing handwriting colour presets");
 // Native collection routes must be reachable through the router, not an iframe.
 for (const route of ["tasks", "projects", "notes", "meetings", "goals", "strategies", "organizations", "decisions"]) {
   assert.match(app, new RegExp(`${route}: \\{ label:`), `missing native collection config for ${route}`);

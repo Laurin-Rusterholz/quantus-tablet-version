@@ -27,6 +27,8 @@ Fenster – sie uebernimmt nicht mehr die gesamte Tablet-Oberflaeche.
 - iPad-artiger Homescreen mit Dashboard, Widgets, App-Raster und Dock
 - globales Tablet Canvas in jeder App und über die Hauptnavigation
 - handschriftliche Notizen mit Apple Pencil, Stift, Finger oder Maus
+- Stift- und Marker-Modus mit Farb-Schnellwahl und variabler Strichstärke
+- native Statistiken und Berichte, direkt aus dem Quantus-Datenstand berechnet
 - AI-Sync-kompatible Sticky Boards direkt an Projekten, Aufgaben, Strategien,
   Konzepten und weiteren Elementen
 - bidirektionale Verknüpfungen zwischen Quantus-Elementen
