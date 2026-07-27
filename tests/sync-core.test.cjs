@@ -107,4 +107,84 @@ function op(overrides = {}) {
   assert.equal(core.toInboxRecord(op({ collection: "organizations", id: "o1" })).type, "organization");
 }
 
-console.log("sync-core: 10 tests passed");
+// ── Speicher-Verbesserungen: Validierung, Warteschlangen-Verdichtung,
+// Backup-Merge und Speicher-Kennzahlen ──
+
+{
+  assert.equal(core.isValidOperation(op()), true);
+  assert.equal(core.isValidOperation(null), false);
+  assert.equal(core.isValidOperation(op({ id: "" })), false);
+  assert.equal(core.isValidOperation(op({ kind: "unknown" })), false);
+  assert.equal(core.isValidOperation(op({ collection: undefined })), false);
+  assert.equal(core.isValidOperation(op({ kind: "habit", collection: undefined })), true);
+  assert.equal(core.isValidOperation(op({ patch: "kaputt" })), false);
+}
+
+{
+  // Drei Updates auf derselben Aufgabe schrumpfen zu einer Operation mit
+  // zusammengefuehrtem Patch und dem juengsten Zeitstempel.
+  const queue = [
+    op({ operationId: "a", updatedAt: "2026-07-20T10:00:00.000Z", patch: { title: "Erster Titel" } }),
+    op({ operationId: "b", updatedAt: "2026-07-20T11:00:00.000Z", patch: { status: "in_progress" } }),
+    op({ operationId: "c", updatedAt: "2026-07-20T12:00:00.000Z", patch: { title: "Finaler Titel" } }),
+    op({ operationId: "d", id: "task-2", updatedAt: "2026-07-20T09:00:00.000Z", patch: { title: "Andere Aufgabe" } }),
+    { kaputt: true }
+  ];
+  const compacted = core.compactQueue(queue);
+  assert.equal(compacted.length, 2);
+  const merged = compacted.find((item) => item.id === "task-1");
+  assert.equal(merged.patch.title, "Finaler Titel");
+  assert.equal(merged.patch.status, "in_progress");
+  assert.equal(merged.updatedAt, "2026-07-20T12:00:00.000Z");
+  assert.equal(compacted[0].id, "task-2");
+}
+
+{
+  // Create + Updates bleiben ein Create; ein Delete ersetzt alles Vorherige.
+  const created = core.compactQueue([
+    op({ operationId: "a", action: "create", updatedAt: "2026-07-20T10:00:00.000Z", patch: { title: "Neu" } }),
+    op({ operationId: "b", action: "update", updatedAt: "2026-07-20T11:00:00.000Z", patch: { status: "done" } })
+  ]);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].action, "create");
+  assert.equal(created[0].patch.status, "done");
+  const deleted = core.compactQueue([
+    op({ operationId: "a", action: "create", updatedAt: "2026-07-20T10:00:00.000Z" }),
+    op({ operationId: "b", action: "delete", updatedAt: "2026-07-20T11:00:00.000Z", patch: {} })
+  ]);
+  assert.equal(deleted.length, 1);
+  assert.equal(deleted[0].action, "delete");
+}
+
+{
+  // Backup-Merge: pro Element gewinnt die neuere Version, nichts geht verloren.
+  const local = core.makeEmptyPayload();
+  local.entities.tasks.t1 = { id: "t1", title: "Lokal neuer", updatedAt: "2026-07-21T10:00:00.000Z" };
+  local.entities.notes.n1 = { id: "n1", title: "Nur lokal", updatedAt: "2026-07-20T10:00:00.000Z" };
+  local.dailyBriefing.routines.push({ id: "h1", name: "Lesen", updatedAt: "2026-07-20T10:00:00.000Z" });
+  const backup = core.makeEmptyPayload();
+  backup.entities.tasks.t1 = { id: "t1", title: "Backup aelter", updatedAt: "2026-07-19T10:00:00.000Z" };
+  backup.entities.tasks.t2 = { id: "t2", title: "Nur im Backup", updatedAt: "2026-07-18T10:00:00.000Z" };
+  backup.recallLabData.cards.push({ id: "c1", front: "A", back: "B", updatedAt: "2026-07-18T10:00:00.000Z" });
+  const merged = core.mergePayloads(local, backup);
+  assert.equal(merged.entities.tasks.t1.title, "Lokal neuer");
+  assert.equal(merged.entities.tasks.t2.title, "Nur im Backup");
+  assert.equal(merged.entities.notes.n1.title, "Nur lokal");
+  assert.equal(merged.dailyBriefing.routines.length, 1);
+  assert.equal(merged.recallLabData.cards.length, 1);
+}
+
+{
+  const payload = core.makeEmptyPayload();
+  payload.entities.tasks.t1 = { id: "t1", title: "Aktiv" };
+  payload.entities.tasks.t2 = { id: "t2", title: "Weg", status: "deleted" };
+  payload.recallLabData.cards.push({ id: "c1" });
+  const stats = core.payloadStats(payload);
+  assert.equal(stats.totalEntities, 1);
+  assert.equal(stats.perCollection.tasks, 1);
+  assert.equal(stats.cards, 1);
+  assert.ok(stats.bytes > 100);
+  assert.ok(core.estimateSize("äöü") >= 6);
+}
+
+console.log("sync-core: 15 tests passed");

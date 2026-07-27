@@ -20,8 +20,15 @@
   const LOCAL_KEYS = {
     settings: "quantus-tablet-settings-v1",
     pending: "quantus-tablet-pending-v1",
-    device: "quantus-tablet-device-v1"
+    device: "quantus-tablet-device-v1",
+    snapshot: "quantus-tablet-snapshot-v1",
+    drafts: "quantus-tablet-drafts-v1",
+    pins: "quantus-tablet-pins-v1"
   };
+  // Obergrenzen fuer die lokale Speicherung: Snapshot nur bis ~3.5 MB in
+  // localStorage ablegen, Warteschlange nie unbegrenzt wachsen lassen.
+  const SNAPSHOT_MAX_BYTES = 3500000;
+  const PENDING_MAX_OPS = 500;
 
   // AI-Sync-Modulkatalog. Module mit einer eigenen Tablet-Ansicht (Aufgaben,
   // Projekte, Notizen, Kalender, Ziele, Strategien und weitere) rendern nativ.
@@ -138,13 +145,21 @@
     driveDocs: {},
     smarterDocs: {},
     selectedDocId: null,
-    pending: loadJson(LOCAL_KEYS.pending, []),
+    pending: [],
     settings: loadJson(LOCAL_KEYS.settings, { aiSyncUrl: DEFAULT_AI_SYNC_URL, theme: "dark" }),
     deviceId: getDeviceId(),
     search: "",
+    sort: "new",
+    statusFilter: "all",
+    pins: loadJson(LOCAL_KEYS.pins, []),
+    drafts: loadJson(LOCAL_KEYS.drafts, {}),
+    snapshotAt: null,
     splitLeft: "reading",
     splitRight: "notes"
   };
+  // Warteschlange beim Start direkt verdichten: alte Mehrfach-Operationen auf
+  // demselben Element schrumpfen zu einer, kaputte Eintraege werden entfernt.
+  state.pending = Core.compactQueue(loadJson(LOCAL_KEYS.pending, []));
 
   let firebaseApp = null;
   let auth = null;
@@ -166,7 +181,98 @@
   }
 
   function saveJson(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch (_) {
+      // Speicher voll: Der Snapshot ist nur ein Beschleuniger und darf weichen,
+      // damit Warteschlange, Einstellungen und Entwuerfe sicher gespeichert bleiben.
+      try {
+        if (key !== LOCAL_KEYS.snapshot) localStorage.removeItem(LOCAL_KEYS.snapshot);
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+      } catch (_) { return false; }
+    }
+  }
+
+  let snapshotTimer = null;
+  // Letzten bekannten Datenstand lokal ablegen, damit die App auch offline und
+  // vor dem ersten Firebase-Kontakt sofort mit echten Inhalten startet.
+  function saveSnapshot() {
+    if (!state.remoteReady) return;
+    const snapshot = { payload: state.payload, savedAt: new Date().toISOString() };
+    if (Core.estimateSize(snapshot) > SNAPSHOT_MAX_BYTES) return;
+    if (saveJson(LOCAL_KEYS.snapshot, snapshot)) state.snapshotAt = snapshot.savedAt;
+  }
+
+  function scheduleSnapshot() {
+    if (snapshotTimer) clearTimeout(snapshotTimer);
+    snapshotTimer = setTimeout(() => { snapshotTimer = null; saveSnapshot(); }, 1500);
+  }
+
+  function hydrateFromSnapshot() {
+    const stored = loadJson(LOCAL_KEYS.snapshot, null);
+    if (!stored || !stored.payload) return;
+    state.payload = Core.normalisePayload(stored.payload);
+    state.snapshotAt = stored.savedAt || null;
+    setSync("offline", `Lokaler Datenstand vom ${relativeTime(state.snapshotAt)} geladen`);
+  }
+
+  function exportBackup() {
+    const backup = {
+      app: "quantus-tablet",
+      exportedAt: new Date().toISOString(),
+      deviceId: state.deviceId,
+      payload: state.payload,
+      pending: state.pending
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `quantus-tablet-backup-${localDateKey()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+    toast("Backup erstellt", "Der komplette Datenstand inklusive Warteschlange wurde heruntergeladen.", "ok");
+  }
+
+  function importBackupFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || ""));
+        const incoming = parsed && parsed.payload ? parsed.payload : parsed;
+        state.payload = Core.mergePayloads(state.payload, incoming);
+        if (Array.isArray(parsed && parsed.pending) && parsed.pending.length) {
+          state.pending = Core.compactQueue([...state.pending, ...parsed.pending]);
+          saveJson(LOCAL_KEYS.pending, state.pending);
+        }
+        state.remoteReady = true;
+        saveSnapshot();
+        scheduleRender();
+        toast("Backup eingespielt", "Die Daten wurden feldweise zusammengefuehrt – die neuere Version gewinnt.", "ok");
+        flushPending();
+      } catch (error) {
+        toast("Backup unlesbar", error.message || "Die Datei ist kein gueltiges Quantus-Backup.", "error");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function clearLocalCache() {
+    try { localStorage.removeItem(LOCAL_KEYS.snapshot); } catch (_) {}
+    try { localStorage.removeItem(LOCAL_KEYS.drafts); } catch (_) {}
+    state.drafts = {};
+    state.snapshotAt = null;
+    toast("Lokaler Cache geleert", "Warteschlange und Einstellungen bleiben erhalten.", "ok");
+    render();
+  }
+
+  function formatBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value >= 1048576) return `${(value / 1048576).toFixed(1)} MB`;
+    if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+    return `${value} B`;
   }
 
   function getDeviceId() {
@@ -238,6 +344,16 @@
     node.innerHTML = `<strong>${esc(title)}</strong>${message ? `<span>${esc(message)}</span>` : ""}`;
     document.getElementById("toasts").appendChild(node);
     setTimeout(() => node.remove(), 4200);
+  }
+
+  // Loeschen ist auf dem Tablet nie endgueltig: Der Hinweis bietet acht Sekunden
+  // lang eine Ein-Klick-Wiederherstellung an.
+  function undoToast(collectionName, id) {
+    const node = document.createElement("div");
+    node.className = "toast";
+    node.innerHTML = `<strong>Eintrag ausgeblendet</strong><span>Aus Versehen? Einfach zurückholen.</span><button class="btn small-btn" data-action="undo-delete" data-collection="${attr(collectionName)}" data-id="${attr(id)}">Rückgängig</button>`;
+    document.getElementById("toasts").appendChild(node);
+    setTimeout(() => node.remove(), 8000);
   }
 
   function setSync(status, message) {
@@ -332,6 +448,7 @@
       state.lastSync = new Date();
       setSync("synced", "AI Sync und Tablet sind auf demselben Stand");
       scheduleRender();
+      scheduleSnapshot();
       flushPending();
     }, (error) => {
       setSync("error", error.message);
@@ -389,6 +506,12 @@
 
   function queueOperation(operation) {
     if (!state.pending.some((item) => item.operationId === operation.operationId)) state.pending.push(operation);
+    // Verdichten statt anhaeufen: pro Element bleibt nur der letzte Stand liegen.
+    state.pending = Core.compactQueue(state.pending);
+    if (state.pending.length > PENDING_MAX_OPS) {
+      state.pending = state.pending.slice(state.pending.length - PENDING_MAX_OPS);
+      toast("Warteschlange voll", `Nur die letzten ${PENDING_MAX_OPS} Änderungen werden vorgemerkt.`, "error");
+    }
     saveJson(LOCAL_KEYS.pending, state.pending);
     setSync("offline", `${state.pending.length} Änderung(en) vorgemerkt`);
   }
@@ -445,6 +568,8 @@
 
   async function flushPending() {
     if (!state.user || !db || !navigator.onLine || !state.pending.length || state.syncStatus === "syncing") return;
+    state.pending = Core.compactQueue(state.pending);
+    saveJson(LOCAL_KEYS.pending, state.pending);
     const queue = state.pending.slice();
     setSync("syncing", `${queue.length} vorgemerkte Änderung(en) werden synchronisiert`);
     for (const operation of queue) {
@@ -502,6 +627,7 @@
       <span class="check">${done ? "✓" : ""}</span>
       <div class="item-main"><div class="item-title">${esc(itemTitle(task,"Aufgabe"))}</div>
       <div class="item-meta">${task.dueDate ? `Fällig ${esc(formatDate(task.dueDate))}` : "Ohne Frist"}${task.projectId ? " · Projekt" : ""}</div></div>
+      ${isOverdue(task) ? `<span class="badge coral">Überfällig</span>` : ""}
       ${task.priority ? `<span class="badge ${task.priority === "high" ? "coral" : ""}">${esc(task.priority)}</span>` : ""}
     </div>`;
   }
@@ -533,6 +659,7 @@
           <p class="muted">${state.user ? "Dein Tablet arbeitet mit demselben Quantus-Datenstand wie AI Sync." : "Verbinde die Tablet-App, um deinen aktuellen Quantus-Tag zu laden."}</p>
           <div class="metric-row">
             <div class="metric"><strong>${tasks.length}</strong><small>offene Aufgaben</small></div>
+            <div class="metric"><strong>${tasks.filter(isOverdue).length}</strong><small>überfällig</small></div>
             <div class="metric"><strong>${events.length}</strong><small>Termine</small></div>
             <div class="metric"><strong>${cards.length}</strong><small>Karteikarten</small></div>
           </div>
@@ -554,6 +681,10 @@
         <section class="widget span-4">
           <div class="widget-head"><span class="widget-icon">▤</span><h2>Weiterlesen</h2><button data-action="go" data-route="reading">Bibliothek</button></div>
           <div class="item-list">${docs.slice(0, 3).map((doc) => `<div class="list-item" data-action="open-doc" data-id="${attr(doc.id || findMapKey(state.driveDocs,doc))}"><span>▧</span><div class="item-main"><div class="item-title">${esc(doc.titel_final || doc.dateiname || "Dokument")}</div><div class="item-meta">${esc(doc.bereich || doc.mimeType || "Quantus Drive")}</div></div></div>`).join("") || emptyMini("Keine Drive-Dokumente geladen")}</div>
+        </section>
+        <section class="widget span-12" style="min-height:auto">
+          <div class="widget-head"><span class="widget-icon">↻</span><h2>Zuletzt bearbeitet</h2><button data-action="go" data-route="reports">Alle</button></div>
+          <div class="item-list">${recentActivity(5).map(({ name, config, item }) => `<div class="list-item" ${COLLECTION_CONFIG[name] ? `data-action="edit-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}"` : ""}><span class="badge accent">${esc(config.label)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Aktivität – lege direkt los.")}</div>
         </section>
         <section class="widget span-12" style="min-height:auto">
           <div class="widget-head"><span class="widget-icon">▦</span><h2>Quantus Apps</h2><button data-action="apps">Alle Apps</button></div>
@@ -588,11 +719,35 @@
 
   function renderCollectionView(name) {
     const config = COLLECTION_CONFIG[name];
-    const items = collection(name).filter((item) => !state.search || `${itemTitle(item)} ${itemText(item)}`.toLowerCase().includes(state.search.toLowerCase()));
+    let items = collection(name);
+    const counts = {
+      all: items.length,
+      open: items.filter((item) => !isDone(item) && item.status !== "in_progress").length,
+      in_progress: items.filter((item) => item.status === "in_progress").length,
+      done: items.filter(isDone).length
+    };
+    if (state.statusFilter === "open") items = items.filter((item) => !isDone(item) && item.status !== "in_progress");
+    else if (state.statusFilter === "in_progress") items = items.filter((item) => item.status === "in_progress");
+    else if (state.statusFilter === "done") items = items.filter(isDone);
+    if (state.search) items = items.filter((item) => `${itemTitle(item)} ${itemText(item)}`.toLowerCase().includes(state.search.toLowerCase()));
+    if (state.sort === "alpha") items = items.slice().sort((a, b) => itemTitle(a, "").localeCompare(itemTitle(b, ""), "de"));
+    else if (state.sort === "due") items = items.slice().sort((a, b) => String(a.dueDate || a.date || "9999").localeCompare(String(b.dueDate || b.date || "9999")));
+    // Angepinnte Elemente stehen immer zuoberst.
+    items = [...items.filter((item) => state.pins.includes(item.id)), ...items.filter((item) => !state.pins.includes(item.id))];
+    const statusChip = (key, label) => `<button class="chip ${state.statusFilter === key ? "on" : ""}" data-action="status-filter" data-status="${key}">${esc(label)} ${counts[key] != null ? counts[key] : ""}</button>`;
     return `<div class="view">
       ${viewHeader(config.plural, collectionSubtitle(name), `<button class="btn" data-action="split-with" data-route="${attr(config.route)}">◫ Split-Screen</button><button class="btn primary" data-action="new-entity" data-collection="${attr(name)}">＋ ${esc(config.label)}</button>`)}
       ${loginBanner()}
-      <div class="filterbar"><div class="search-field"><span>⌕</span><input data-action="filter-collection" placeholder="${esc(config.plural)} durchsuchen" value="${attr(state.search)}"></div></div>
+      <form class="quick-add" data-form="quick-add" data-collection="${attr(name)}"><span>＋</span><input name="title" data-quickadd placeholder="${esc(config.label)} eintippen und Enter druecken – ohne Formular" autocomplete="off"><button class="btn primary small-btn" type="submit">Hinzufuegen</button></form>
+      <div class="filterbar">
+        <div class="search-field"><span>⌕</span><input data-action="filter-collection" placeholder="${esc(config.plural)} durchsuchen" value="${attr(state.search)}"></div>
+        <div class="chip-row">${statusChip("all", "Alle")}${statusChip("open", "Offen")}${statusChip("in_progress", "In Arbeit")}${statusChip("done", "Erledigt")}</div>
+        <select class="sort-select" data-action="sort-collection" aria-label="Sortierung">
+          <option value="new" ${state.sort === "new" ? "selected" : ""}>Neueste zuerst</option>
+          <option value="alpha" ${state.sort === "alpha" ? "selected" : ""}>A bis Z</option>
+          <option value="due" ${state.sort === "due" ? "selected" : ""}>Nach Faelligkeit</option>
+        </select>
+      </div>
       <div class="content-grid">${items.map((item) => entityCard(name,item)).join("") || emptyState(config.icon,`Noch keine ${config.plural}`,`Erstelle den ersten Eintrag auf dem Tablet oder in AI Sync.`)}</div>
     </div>`;
   }
@@ -606,13 +761,21 @@
     return `${config ? config.plural : "Einträge"} aus AI Sync – Änderungen sind sofort auf Tablet und Desktop sichtbar.`;
   }
 
+  function isOverdue(item) {
+    const due = String(item && (item.dueDate || item.date) || "").slice(0, 10);
+    return Boolean(due) && due < localDateKey() && !isDone(item);
+  }
+
   function entityCard(name, item) {
     const config = COLLECTION_CONFIG[name];
     const meta = item.dueDate || item.date || item.updatedAt || item.createdAt;
-    return `<article class="entity-card">
-      <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}</div>
+    const pinned = state.pins.includes(item.id);
+    return `<article class="entity-card ${pinned ? "pinned" : ""}">
+      <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}${isOverdue(item) ? `<span class="badge coral">Überfällig</span>` : ""}${pinned ? `<span class="badge sand">Angepinnt</span>` : ""}</div>
       <h3>${esc(itemTitle(item,config.label))}</h3><p>${esc(itemText(item) || "Keine Beschreibung")}</p>
       <div class="card-foot"><span class="muted small">${meta ? esc(formatDate(meta)) : ""}</span><span class="spacer"></span>
+        <button class="icon-action" data-action="pin-entity" data-id="${attr(item.id)}" aria-label="${pinned ? "Lösen" : "Anpinnen"}">${pinned ? "★" : "☆"}</button>
+        <button class="icon-action" data-action="duplicate-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Duplizieren">⧉</button>
         <button class="icon-action" data-action="edit-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Bearbeiten">✎</button>
         <button class="icon-action" data-action="delete-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Löschen">⌫</button>
       </div>
@@ -928,7 +1091,22 @@
     return `<div class="view">${viewHeader("Einstellungen", "Verbindung, Darstellung und Installation der Tablet-App.", "")}
       <div class="dashboard-grid"><section class="widget span-6"><div class="widget-head"><span class="widget-icon">↔</span><h2>Synchronisation</h2></div><div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Konto</small><strong>${esc(state.user ? (state.user.email || state.user.displayName) : "Nicht angemeldet")}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Offline-Warteschlange</small><strong>${state.pending.length} Änderung(en)</strong></div></div><div class="row-actions" style="margin-top:14px">${state.user ? `<button class="btn" data-action="flush-sync">Jetzt synchronisieren</button><button class="btn danger" data-action="sign-out">Abmelden</button>` : `<button class="btn primary" data-action="sign-in">Mit Google anmelden</button>`}</div></section>
       <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
+      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">▰</span><h2>Speicher und Backup</h2></div>${storageDetails()}<div class="row-actions" style="margin-top:14px"><button class="btn primary" data-action="export-backup">Backup herunterladen</button><button class="btn" data-action="import-backup">Backup einspielen</button><button class="btn" data-action="clear-cache">Lokalen Cache leeren</button></div><input type="file" id="backupFileInput" accept="application/json,.json" style="display:none"></section>
+      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⌨</span><h2>Tastatur-Abkürzungen</h2></div><div class="item-list">${[["Ctrl/Cmd + K","Alles durchsuchen"],["Ctrl/Cmd + P","Polaris öffnen"],["Alt + N","Neuer Eintrag in der aktuellen Ansicht"],["Ctrl/Cmd + S","Snapshot sichern und synchronisieren"],["Alt + 1 bis 9","Zwischen den Hauptansichten wechseln"],["Esc","Dialog schliessen"]].map(([keys,label]) => `<div class="list-item"><span class="badge">${esc(keys)}</span><div class="item-main"><div class="item-title">${esc(label)}</div></div></div>`).join("")}</div></section>
       <section class="widget span-12"><div class="widget-head"><span class="widget-icon">＋</span><h2>Als App installieren</h2></div><p class="muted">Öffne im Browser das Teilen-Menü und wähle „Zum Home-Bildschirm“. Danach startet Quantus Tablet ohne Browserleiste wie eine normale App.</p></section></div></div>`;
+  }
+
+  function storageDetails() {
+    const stats = Core.payloadStats(state.payload);
+    let snapshotBytes = 0;
+    try { snapshotBytes = (localStorage.getItem(LOCAL_KEYS.snapshot) || "").length; } catch (_) {}
+    return `<div class="sync-details">
+      <div class="detail-block"><small>Aktive Elemente</small><strong>${stats.totalEntities}</strong></div>
+      <div class="detail-block"><small>Datenstand</small><strong>${esc(formatBytes(stats.bytes))}</strong></div>
+      <div class="detail-block"><small>Lokaler Snapshot</small><strong>${snapshotBytes ? esc(formatBytes(snapshotBytes)) + " · " + esc(relativeTime(state.snapshotAt)) : "Noch keiner"}</strong></div>
+      <div class="detail-block"><small>Karteikarten / Routinen</small><strong>${stats.cards} / ${stats.routines}</strong></div>
+    </div>
+    <p class="muted small" style="margin-top:10px">Der Snapshot lädt deine Daten beim Start sofort – auch offline. Das Backup enthält zusätzlich die Offline-Warteschlange und lässt sich hier feldweise wieder einspielen.</p>`;
   }
 
   function render() {
@@ -1002,7 +1180,12 @@
     const config = COLLECTION_CONFIG[name];
     if (!config) return;
     const existing = id ? collection(name).find((item) => item.id === id) : null;
-    const body = `<form data-form="entity" data-collection="${attr(name)}" data-id="${attr(id || "")}"><div class="form-grid"><div class="field full"><label>Titel</label><input name="title" value="${attr(existing && itemTitle(existing,""))}" required></div><div class="field full"><label>Beschreibung / Inhalt</label><textarea name="description">${esc(existing && itemText(existing))}</textarea></div><div class="field"><label>Status</label><select name="status"><option value="open" ${!existing||existing.status==="open"?"selected":""}>Offen</option><option value="in_progress" ${existing&&existing.status==="in_progress"?"selected":""}>In Arbeit</option><option value="done" ${existing&&isDone(existing)?"selected":""}>Erledigt</option></select></div><div class="field"><label>${name === "meetings" ? "Datum" : "Fällig am"}</label><input name="date" type="date" value="${attr(existing && String(existing.date || existing.dueDate || "").slice(0,10))}"></div>${name === "meetings" ? `<div class="field"><label>Zeit</label><input name="time" type="time" value="${attr(existing && (existing.time || ""))}"></div><div class="field"><label>Ort</label><input name="location" value="${attr(existing && existing.location)}"></div>` : ""}</div><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Mit AI Sync speichern</button></div></form>`;
+    // Unfertige Eingaben ueberleben ein versehentliches Schliessen oder einen
+    // Absturz: Beim naechsten Oeffnen steht der Entwurf wieder im Formular.
+    const draft = !existing ? state.drafts[name] : null;
+    const draftTitle = draft && draft.title || "";
+    const draftText = draft && draft.description || "";
+    const body = `<form data-form="entity" data-collection="${attr(name)}" data-id="${attr(id || "")}">${draft ? `<p class="muted small" style="margin:0 0 10px">Entwurf von ${esc(relativeTime(draft.savedAt))} wiederhergestellt.</p>` : ""}<div class="form-grid"><div class="field full"><label>Titel</label><input name="title" value="${attr(existing ? itemTitle(existing,"") : draftTitle)}" required></div><div class="field full"><label>Beschreibung / Inhalt</label><textarea name="description">${esc(existing ? itemText(existing) : draftText)}</textarea></div><div class="field"><label>Status</label><select name="status"><option value="open" ${!existing||existing.status==="open"?"selected":""}>Offen</option><option value="in_progress" ${existing&&existing.status==="in_progress"?"selected":""}>In Arbeit</option><option value="done" ${existing&&isDone(existing)?"selected":""}>Erledigt</option></select></div><div class="field"><label>${name === "meetings" ? "Datum" : "Fällig am"}</label><input name="date" type="date" value="${attr(existing && String(existing.date || existing.dueDate || "").slice(0,10))}"></div>${name === "meetings" ? `<div class="field"><label>Zeit</label><input name="time" type="time" value="${attr(existing && (existing.time || ""))}"></div><div class="field"><label>Ort</label><input name="location" value="${attr(existing && existing.location)}"></div>` : ""}</div><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Mit AI Sync speichern</button></div></form>`;
     sheet(`${existing ? "Bearbeiten" : "Neu"}: ${config.label}`, body);
   }
 
@@ -1110,8 +1293,18 @@
       const date = String(data.get("date")||"");
       if (name === "meetings") { patch.date=date; patch.time=String(data.get("time")||""); patch.location=String(data.get("location")||""); }
       else patch.dueDate = date;
+      if (!existingId) { delete state.drafts[name]; saveJson(LOCAL_KEYS.drafts, state.drafts); }
       closeOverlay();
       await executeOperation(makeOperation("entity",existingId?"update":"create",name,id,patch));
+    } else if (type === "quick-add") {
+      const name = form.dataset.collection;
+      const title = String(data.get("title")||"").trim();
+      if (!name || !title || !COLLECTION_CONFIG[name]) return;
+      const input = form.querySelector("[data-quickadd]");
+      if (input) input.value = "";
+      await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),{ title, description:"", status:"open", source:"tablet-quick-add" }),{silent:true});
+      toast(`${COLLECTION_CONFIG[name].label} erstellt`, title, "ok");
+      requestAnimationFrame(() => { const next=document.querySelector("[data-quickadd]"); if (next) next.focus(); });
     } else if (type === "habit") {
       const id = Core.makeId("habit");
       closeOverlay();
@@ -1167,8 +1360,42 @@
     if (action === "edit-entity") { openEntityForm(button.dataset.collection,button.dataset.id); return; }
     if (action === "delete-entity") {
       if (!confirm("Diesen Eintrag ausblenden? Er wird als gelöscht markiert und kann nicht versehentlich andere Quantus-Daten entfernen.")) return;
-      await executeOperation(makeOperation("entity","delete",button.dataset.collection,button.dataset.id,{})); return;
+      const deletedCollection = button.dataset.collection, deletedId = button.dataset.id;
+      await executeOperation(makeOperation("entity","delete",deletedCollection,deletedId,{}),{silent:true});
+      undoToast(deletedCollection, deletedId);
+      return;
     }
+    if (action === "undo-delete") {
+      const toastNode = button.closest(".toast");
+      if (toastNode) toastNode.remove();
+      await executeOperation(makeOperation("entity","update",button.dataset.collection,button.dataset.id,{ status:"open", deletedAt:null }),{silent:true});
+      toast("Wiederhergestellt", "Der Eintrag ist zurück.", "ok");
+      return;
+    }
+    if (action === "pin-entity") {
+      const id = button.dataset.id;
+      const index = state.pins.indexOf(id);
+      if (index >= 0) state.pins.splice(index,1); else state.pins.unshift(id);
+      saveJson(LOCAL_KEYS.pins, state.pins);
+      render();
+      return;
+    }
+    if (action === "duplicate-entity") {
+      const name = button.dataset.collection;
+      const source = collection(name).find((item) => item.id === button.dataset.id);
+      if (!source || !COLLECTION_CONFIG[name]) return;
+      const patch = { ...source };
+      ["id","createdAt","updatedAt","deletedAt","completedAt"].forEach((key) => delete patch[key]);
+      patch.title = `${itemTitle(source, COLLECTION_CONFIG[name].label)} (Kopie)`;
+      if (isDone(source)) patch.status = "open";
+      await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),patch),{silent:true});
+      toast("Dupliziert", patch.title, "ok");
+      return;
+    }
+    if (action === "export-backup") { exportBackup(); return; }
+    if (action === "import-backup") { const input=document.getElementById("backupFileInput"); if (input) input.click(); return; }
+    if (action === "clear-cache") { clearLocalCache(); return; }
+    if (action === "status-filter") { state.statusFilter = button.dataset.status || "all"; render(); return; }
     if (action === "toggle-task") {
       const task = collection("tasks").find((item) => item.id === button.dataset.id); if (!task) return;
       await executeOperation(makeOperation("entity","update","tasks",task.id,{ status:isDone(task)?"open":"done", completedAt:isDone(task)?null:new Date().toISOString() }),{silent:true}); return;
@@ -1196,16 +1423,41 @@
 
   document.addEventListener("click", handleClick);
   document.addEventListener("submit", (event) => { const form=event.target.closest("form[data-form]"); if(!form)return; event.preventDefault(); handleSubmit(form); });
+  let searchDebounce = null;
+  let draftDebounce = null;
   document.addEventListener("input", (event) => {
     if (event.target.matches('[data-action="filter-collection"]')) {
       const value=event.target.value;
       state.search=value;
-      render();
-      requestAnimationFrame(()=>{const input=document.querySelector('[data-action="filter-collection"]');if(input){input.focus();input.setSelectionRange(value.length,value.length);}});
+      // Debounce: erst nach kurzer Tipppause neu rendern statt bei jedem Zeichen.
+      if (searchDebounce) clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        searchDebounce = null;
+        render();
+        requestAnimationFrame(()=>{const input=document.querySelector('[data-action="filter-collection"]');if(input){input.focus();input.setSelectionRange(state.search.length,state.search.length);}});
+      }, 140);
     }
     if (event.target.matches('[data-action="global-search"]')) { const target=document.getElementById("searchResults"); if(target)target.innerHTML=searchResults(event.target.value); }
+    const entityForm = event.target.closest('form[data-form="entity"]');
+    if (entityForm && !entityForm.dataset.id) {
+      const data = new FormData(entityForm);
+      state.drafts[entityForm.dataset.collection] = {
+        title: String(data.get("title")||""),
+        description: String(data.get("description")||""),
+        savedAt: new Date().toISOString()
+      };
+      if (draftDebounce) clearTimeout(draftDebounce);
+      draftDebounce = setTimeout(() => { draftDebounce = null; saveJson(LOCAL_KEYS.drafts, state.drafts); }, 400);
+    }
   });
   document.addEventListener("change", (event) => {
+    if (event.target.id === "backupFileInput") {
+      importBackupFile(event.target.files && event.target.files[0]);
+      event.target.value = "";
+      return;
+    }
+    const sortSelect=event.target.closest('[data-action="sort-collection"]');
+    if (sortSelect) { state.sort=sortSelect.value; render(); return; }
     const select=event.target.closest('[data-action="split-select"]'); if(!select)return;
     if(select.dataset.side==="left")state.splitLeft=select.value; else state.splitRight=select.value; render();
   });
@@ -1215,12 +1467,22 @@
     const anchor=selection&&selection.anchorNode&&selection.anchorNode.parentElement;
     if(anchor&&anchor.closest("[data-reader]"))showSelectionTools(text); else if(!anchor||!anchor.closest(".selection-tools"))document.querySelectorAll(".selection-tools").forEach((node)=>node.remove());
   });
+  const SHORTCUT_ROUTES = ["home","daily","tasks","projects","notes","calendar","learning","habits","workspace"];
   document.addEventListener("keydown", (event) => {
     if(event.key==="Escape")closeOverlay();
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();openSearch();}
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="p"){event.preventDefault();openPolarisSheet();}
+    // Ctrl/Cmd+S: Snapshot sichern und Warteschlange abgleichen statt Browser-Dialog.
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s"){event.preventDefault();saveSnapshot();flushPending();toast("Gesichert","Snapshot gespeichert, Warteschlange wird abgeglichen.","ok");}
+    const typing = /^(input|textarea|select)$/i.test(event.target && event.target.tagName || "");
+    // Alt+N: neuer Eintrag passend zur aktuellen Ansicht.
+    if(event.altKey && !typing && event.key.toLowerCase()==="n"){event.preventDefault();openEntityForm(COLLECTION_CONFIG[state.route]?state.route:"tasks");}
+    // Alt+1..9: direkt zwischen den Hauptansichten wechseln.
+    if(event.altKey && !typing && /^[1-9]$/.test(event.key)){const route=SHORTCUT_ROUTES[Number(event.key)-1];if(route){event.preventDefault();go(route);}}
   });
-  window.addEventListener("hashchange", () => { state.search=""; render(); main.focus(); });
+  window.addEventListener("hashchange", () => { state.search=""; state.statusFilter="all"; render(); main.focus(); });
+  // Beim Verlassen der Seite den letzten Stand ohne Verzoegerung sichern.
+  window.addEventListener("pagehide", () => { if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; } saveSnapshot(); if (draftDebounce) { clearTimeout(draftDebounce); draftDebounce = null; saveJson(LOCAL_KEYS.drafts, state.drafts); } });
   window.addEventListener("online", () => { setSync("syncing","Verbindung wiederhergestellt"); flushPending(); });
   window.addEventListener("offline", () => setSync("offline","Keine Internetverbindung"));
   document.addEventListener("visibilitychange", () => { if(!document.hidden)flushPending(); });
@@ -1228,7 +1490,13 @@
   function boot() {
     applyTheme(state.settings.theme || "dark");
     updateClock(); clockTimer=setInterval(updateClock,30000);
+    // Erst der lokale Snapshot (sofortige Inhalte, auch offline), dann Firebase.
+    hydrateFromSnapshot();
+    if (!navigator.onLine) setSync("offline", "Keine Internetverbindung – lokaler Datenstand aktiv");
     state.route=getRoute(); render(); initFirebase();
+    // Zurueckgestellte Aenderungen regelmaessig nachschieben, falls ein einzelner
+    // Versuch (z. B. direkt nach dem Aufwachen) fehlgeschlagen ist.
+    setInterval(() => { if (state.pending.length) flushPending(); }, 20000);
     if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
   }
 
