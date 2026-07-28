@@ -19,6 +19,8 @@
   "shortcuts": [
     { "name": "Heute", "url": "/#/daily" },
     { "name": "Aufgaben", "url": "/#/tasks" },
+    { "name": "Notizen", "url": "/#/notes" },
+    { "name": "Tablet Canvas", "url": "/#/workspace" },
     { "name": "Lesen", "url": "/#/reading" },
     { "name": "Polaris", "url": "/#/polaris" }
   ]

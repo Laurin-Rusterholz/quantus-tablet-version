@@ -327,3 +327,15 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
 @keyframes slideup { from { opacity:0; transform:translateY(28px); } to { opacity:1; transform:none; } }
 @keyframes toastin { from { opacity:0; transform:translateX(18px); } to { opacity:1; transform:none; } }
 @keyframes pulse { 50% { opacity:.45; } }
+
+/* ── Produktivitaet: Schnell-Erfassung, Filterchips, Sortierung, Undo ── */
+.quick-add { display:flex; align-items:center; gap:10px; margin-bottom:14px; padding:6px 6px 6px 16px; border:1px dashed var(--border2); border-radius:var(--radius); background:var(--surface-raised); }
+.quick-add span { color:var(--accent); font-weight:800; }
+.quick-add input { flex:1; border:0; background:transparent; padding:10px 0; min-height:40px; }
+.quick-add input:focus { outline:none; box-shadow:none; }
+.chip-row { display:flex; gap:6px; flex-wrap:wrap; }
+.chip { min-height:34px; padding:5px 12px; border-radius:999px; border:1px solid var(--border); background:var(--surface-soft); color:var(--text2); font-size:12px; font-weight:700; cursor:pointer; }
+.chip.on { background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+.sort-select { min-height:38px; max-width:180px; padding:6px 10px; border-radius:10px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text); font-size:12.5px; }
+.entity-card.pinned { border-color:var(--sand); }
+.toast .btn { margin-top:8px; }

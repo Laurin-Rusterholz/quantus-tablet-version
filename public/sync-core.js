@@ -27,6 +27,9 @@
 
   function clone(value) {
     if (value == null) return value;
+    if (typeof structuredClone === "function") {
+      try { return structuredClone(value); } catch (_) {}
+    }
     return JSON.parse(JSON.stringify(value));
   }
 
@@ -234,6 +237,127 @@
     return `${prefix || "qt"}_${random}`;
   }
 
+  function isValidOperation(operation) {
+    if (!isObject(operation)) return false;
+    if (!operation.id || typeof operation.id !== "string") return false;
+    if (!["entity", "habit", "flashcard"].includes(operation.kind)) return false;
+    if (operation.kind === "entity" && (!operation.collection || typeof operation.collection !== "string")) return false;
+    if (operation.action && !["create", "update", "delete"].includes(operation.action)) return false;
+    if (operation.patch != null && !isObject(operation.patch)) return false;
+    return true;
+  }
+
+  // Verdichtet eine Offline-Warteschlange: mehrere Operationen auf demselben
+  // Element werden zu einer einzigen zusammengefasst (letzter Stand gewinnt,
+  // ein Delete ersetzt alle vorherigen Schritte). Ungueltige Eintraege fliegen
+  // raus. Das haelt localStorage klein und macht das Nachsynchronisieren schnell.
+  function compactQueue(operations) {
+    const list = (Array.isArray(operations) ? operations : []).filter(isValidOperation);
+    const groups = new Map();
+    list.forEach((operation) => {
+      const key = [operation.kind, operation.collection || "", operation.id].join("::");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(operation);
+    });
+    const compacted = [];
+    groups.forEach((ops) => {
+      ops.sort((a, b) => operationTime(a) - operationTime(b));
+      const last = ops[ops.length - 1];
+      if (last.action === "delete") { compacted.push(clone(last)); return; }
+      const merged = clone(ops[0]);
+      merged.patch = {};
+      let hasCreate = false;
+      ops.forEach((operation) => {
+        if (operation.action === "create") hasCreate = true;
+        if (isObject(operation.patch)) Object.assign(merged.patch, clone(operation.patch));
+      });
+      merged.action = hasCreate ? "create" : "update";
+      merged.updatedAt = last.updatedAt;
+      if (last.operationId) merged.operationId = last.operationId;
+      compacted.push(merged);
+    });
+    compacted.sort((a, b) => operationTime(a) - operationTime(b));
+    return compacted;
+  }
+
+  function newerItem(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return currentTime(b) >= currentTime(a) ? b : a;
+  }
+
+  function mergeById(listA, listB) {
+    const map = new Map();
+    [...(Array.isArray(listA) ? listA : []), ...(Array.isArray(listB) ? listB : [])].forEach((item) => {
+      if (!isObject(item) || item.id == null) return;
+      map.set(item.id, newerItem(map.get(item.id), item));
+    });
+    return Array.from(map.values()).map(clone);
+  }
+
+  // Feldweiser Zusammenzug zweier Datenstaende (z. B. lokaler Snapshot und
+  // Backup-Datei): pro Element gewinnt die neuere Version, nichts geht verloren.
+  function mergePayloads(inputA, inputB) {
+    const a = normalisePayload(inputA);
+    const b = normalisePayload(inputB);
+    const merged = makeEmptyPayload();
+    const collections = new Set([...Object.keys(a.entities), ...Object.keys(b.entities)]);
+    collections.forEach((name) => {
+      const target = {};
+      const mapA = isObject(a.entities[name]) ? a.entities[name] : {};
+      const mapB = isObject(b.entities[name]) ? b.entities[name] : {};
+      new Set([...Object.keys(mapA), ...Object.keys(mapB)]).forEach((id) => {
+        target[id] = clone(newerItem(mapA[id], mapB[id]));
+      });
+      merged.entities[name] = target;
+    });
+    merged.dailyBriefing = { ...clone(a.dailyBriefing), ...clone(b.dailyBriefing) };
+    merged.dailyBriefing.routines = mergeById(a.dailyBriefing.routines, b.dailyBriefing.routines);
+    merged.dailyBriefing.beliefs = clone(b.dailyBriefing.beliefs.length ? b.dailyBriefing.beliefs : a.dailyBriefing.beliefs);
+    merged.recallLabData = { ...clone(a.recallLabData), ...clone(b.recallLabData) };
+    merged.recallLabData.cards = mergeById(a.recallLabData.cards, b.recallLabData.cards);
+    merged.recallLabData.decks = mergeById(a.recallLabData.decks, b.recallLabData.decks);
+    const logs = new Map();
+    [...a.recallLabData.reviewLogs, ...b.recallLabData.reviewLogs].forEach((log) => {
+      if (!log) return;
+      const key = log.id || `${log.cardId || ""}::${log.ts || log.date || ""}`;
+      if (!logs.has(key)) logs.set(key, clone(log));
+    });
+    merged.recallLabData.reviewLogs = Array.from(logs.values());
+    merged.meta = parseTime(a.meta.updatedAt) >= parseTime(b.meta.updatedAt) ? clone(a.meta) : clone(b.meta);
+    return merged;
+  }
+
+  function estimateSize(value) {
+    let json = "";
+    try { json = typeof value === "string" ? value : (JSON.stringify(value) || ""); } catch (_) { return 0; }
+    if (typeof TextEncoder !== "undefined") {
+      try { return new TextEncoder().encode(json).length; } catch (_) {}
+    }
+    return json.length;
+  }
+
+  // Kennzahlen fuer die Speicher-Anzeige in den Einstellungen: wie viele aktive
+  // Elemente pro Sammlung vorhanden sind und wie gross der Datenstand ist.
+  function payloadStats(payload) {
+    const normalised = normalisePayload(payload);
+    const perCollection = {};
+    let totalEntities = 0;
+    Object.keys(normalised.entities).forEach((name) => {
+      const active = Object.values(normalised.entities[name]).filter((item) =>
+        isObject(item) && item.status !== "deleted" && !item.deletedAt).length;
+      if (active) perCollection[name] = active;
+      totalEntities += active;
+    });
+    return {
+      totalEntities,
+      perCollection,
+      routines: normalised.dailyBriefing.routines.length,
+      cards: normalised.recallLabData.cards.length,
+      bytes: estimateSize(normalised)
+    };
+  }
+
   return {
     ENTITY_TYPES,
     makeEmptyPayload,
@@ -242,6 +366,11 @@
     applyOperation,
     buildWrapper,
     toInboxRecord,
-    makeId
+    makeId,
+    isValidOperation,
+    compactQueue,
+    mergePayloads,
+    estimateSize,
+    payloadStats
   };
 });

@@ -50,4 +50,17 @@ for (const feature of ["handwriting", "stickyBoard", "externalLinks", "linkedPro
 assert.match(html, /firebase-storage-compat\.js/, "missing Firebase Storage SDK");
 assert.match(html, /data-action="workspace"/, "missing global workspace launcher");
 
+// Speicher- und Produktivitaets-Verbesserungen muessen verdrahtet bleiben.
+const syncCore = fs.readFileSync(path.join(root, "sync-core.js"), "utf8");
+for (const fn of ["compactQueue", "mergePayloads", "isValidOperation", "payloadStats", "estimateSize"]) {
+  assert.match(syncCore, new RegExp(`function ${fn}\\b`), `sync-core is missing ${fn}`);
+}
+for (const feature of ["hydrateFromSnapshot", "saveSnapshot", "exportBackup", "importBackupFile", "undoToast", "quick-add", "status-filter", "sort-collection", "pin-entity", "duplicate-entity", "PENDING_MAX_OPS"]) {
+  assert.match(app, new RegExp(feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `app.js is missing storage/productivity feature ${feature}`);
+}
+assert.match(app, /Core\.compactQueue/, "pending queue must be compacted through sync-core");
+assert.match(serviceWorker, /staleWhileRevalidate|stale-while-revalidate/i, "service worker should serve static assets cache-first with background refresh");
+assert.match(serviceWorker, /networkFirst/, "service worker should keep navigations network-first with cache fallback");
+assert.ok(manifest.shortcuts.length >= 5, "manifest should expose launcher shortcuts");
+
 console.log("structure: shell, full AI Sync app catalog, manifest and local assets passed");
