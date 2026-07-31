@@ -84,12 +84,26 @@
   ];
 
   const APP_DEFS = [
-    { key: "home", label: "Tablet Home", icon: "⌂", tone: "green", local: true, group: "Tablet" },
+    { key: "home", label: "Home", icon: "⌂", tone: "green", local: true, group: "Tablet" },
+    { key: "dashboard", label: "Dashboard", icon: "▤", tone: "green", local: true, group: "Tablet" },
+    { key: "mail", label: "Mail", icon: "✉", tone: "blue", local: true, group: "Tablet" },
+    { key: "flowertech", label: "FlowerTech", icon: "❀", tone: "coral", local: true, group: "Tablet" },
     { key: "workspace", label: "Tablet Canvas", icon: "✎", tone: "coral", local: true, group: "Tablet" },
     ...FULL_APP_DEFS,
     { key: "split", label: "Split-Screen", icon: "◫", tone: "blue", local: true, group: "Tablet" },
     { key: "settings", label: "Einstellungen", icon: "⚙", tone: "blue", local: true, group: "Tablet" }
   ];
+
+  // ── Tablet-Module ────────────────────────────────────────────────────────
+  // Eigenstaendige Programme (Homebildschirm, Mail, FlowerTech) melden sich
+  // ueber window.__quantusTabletModules an. Sie liefern eigene Routen,
+  // Klick-Aktionen und Formulare, ohne app.js aufzublaehen.
+  function tabletModules() {
+    return Array.isArray(window.__quantusTabletModules) ? window.__quantusTabletModules : [];
+  }
+  function moduleFor(route) {
+    return tabletModules().find((mod) => Array.isArray(mod.routes) && mod.routes.includes(route)) || null;
+  }
 
   const FULL_APPS = Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app]));
 
@@ -99,6 +113,7 @@
     projects: "Projekte", meetings: "Meetings", habits: "Habits",
     budget: "Budget", split: "Split-Screen", polaris: "Polaris",
     settings: "Einstellungen", apps: "Alle Apps", workspace: "Tablet Canvas",
+    dashboard: "Dashboard", mail: "Mail", flowertech: "FlowerTech",
     ...Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app.label]))
   };
 
@@ -127,8 +142,9 @@
   // oeffnen als native Modul-Uebersicht mit optionalem Sprung in ein separates
   // Fenster – es wird bewusst keine fremde App mehr in einem iframe eingebettet.
   const NATIVE_ROUTES = new Set([
-    "home", "daily", "dailybriefing", "reading", "learning", "habits", "budget",
-    "polaris", "concepts", "calendar", "workspace", "split", "settings", "apps",
+    "home", "dashboard", "mail", "flowertech", "daily", "dailybriefing", "reading",
+    "learning", "habits", "budget", "polaris", "concepts", "calendar", "workspace",
+    "split", "settings", "apps",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -1116,6 +1132,11 @@
     main.innerHTML = renderRoute(state.route);
     updateAccountButton();
     window.QuantusTabletWorkspace?.mountRoute?.();
+    const mounted = moduleFor(state.route);
+    if (mounted && typeof mounted.mount === "function") {
+      try { mounted.mount(state.route, main); }
+      catch (error) { console.warn("[Tablet-Modul mount]", mounted.key, error); }
+    }
   }
 
   // Native Tablet-Navigation. Jede App rendert ihre eigene Ansicht direkt in der
@@ -1123,6 +1144,12 @@
   // laesst sich jederzeit frei zwischen allen Apps wechseln.
   function renderRoute(route) {
     if (route === "workspace") return window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
+    // Eigenstaendige Tablet-Programme zuerst (Homebildschirm, Mail, FlowerTech).
+    const mod = moduleFor(route);
+    if (mod && typeof mod.render === "function") {
+      try { return mod.render(route); }
+      catch (error) { console.warn("[Tablet-Modul]", mod.key, error); }
+    }
     if (route === "home") return renderHome();
     if (route === "apps") return renderApps();
     if (route === "split") return renderSplit();
@@ -1285,6 +1312,14 @@
   async function handleSubmit(form) {
     const data = new FormData(form);
     const type = form.dataset.form;
+    // Formulare der Tablet-Module (Mail verfassen, FlowerTech-Dokumente) zuerst.
+    for (const mod of tabletModules()) {
+      if (typeof mod.onSubmit !== "function") continue;
+      let handled = false;
+      try { handled = await mod.onSubmit(type, form, data); }
+      catch (error) { console.warn("[Tablet-Modul submit]", mod.key, error); }
+      if (handled) return;
+    }
     if (type === "entity") {
       const name = form.dataset.collection;
       const existingId = form.dataset.id;
@@ -1337,6 +1372,14 @@
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const action = button.dataset.action;
+    // Tablet-Module duerfen eigene Aktionen zuerst behandeln.
+    for (const mod of tabletModules()) {
+      if (typeof mod.onAction !== "function") continue;
+      let handled = false;
+      try { handled = await mod.onAction(action, button, event); }
+      catch (error) { console.warn("[Tablet-Modul action]", mod.key, error); }
+      if (handled) return;
+    }
     if (action === "close-overlay") {
       if (button.classList.contains("overlay") && event.target !== button) return;
       closeOverlay();
@@ -1503,7 +1546,11 @@
   window.__quantusTablet = {
     state, executeOperation, makeOperation, collection, go, toast, Core, APP_STORE_PATH, RTDB_URL,
     getStorage: () => storage,
-    getDatabase: () => db
+    getDatabase: () => db,
+    // Bausteine fuer die Tablet-Module (Homebildschirm, Mail, FlowerTech)
+    render, scheduleRender, sheet, closeOverlay, appBaseUrl, viewHeader, emptyState, emptyMini,
+    esc, attr, formatDate, formatTime, relativeTime, money, itemTitle, itemText, isDone,
+    localDateKey, todayTasks, dueCards, activeHabits, APP_DEFS, COLLECTION_CONFIG
   };
   boot();
 })();

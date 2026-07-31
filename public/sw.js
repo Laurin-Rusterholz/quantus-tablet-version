@@ -1,5 +1,5 @@
-const CACHE = "quantus-tablet-v4-speicher";
-const SHELL = ["/", "/index.html", "/styles.css", "/tablet-workspace.css", "/sync-core.js", "/tablet-workspace.js", "/app.js", "/icon.svg", "/manifest.webmanifest"];
+const CACHE = "quantus-tablet-v5-apps";
+const SHELL = ["/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css", "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/flowertech-app.js", "/app.js", "/icon.svg", "/manifest.webmanifest"];
 const NETWORK_TIMEOUT_MS = 3500;
 
 self.addEventListener("install", (event) => {

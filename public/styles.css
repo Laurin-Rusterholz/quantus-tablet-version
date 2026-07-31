@@ -8,9 +8,9 @@
   --text:#eef0f2;
   --text2:#cbd0d6;
   --muted:#929aa4;
-  --accent:#45c198;
-  --accent-deep:#2ea27b;
-  --accent-soft:rgba(69,193,152,.16);
+  --accent:#a78bfa;
+  --accent-deep:#8b5cf6;
+  --accent-soft:rgba(167,139,250,.18);
   --coral:#d96c57;
   --sand:#c9a976;
   --blue:#6aa3de;
@@ -36,9 +36,9 @@ html.theme-light {
   --text:#2a2620;
   --text2:#514b42;
   --muted:#7a7463;
-  --accent:#1f8a66;
-  --accent-deep:#15704f;
-  --accent-soft:rgba(31,138,102,.14);
+  --accent:#6b46c1;
+  --accent-deep:#553c9a;
+  --accent-soft:rgba(107,70,193,.16);
   --shadow:0 14px 40px rgba(62,52,40,.14);
   --shadow-soft:0 4px 14px rgba(62,52,40,.10);
 }
@@ -65,7 +65,7 @@ a { color:var(--accent); }
   backdrop-filter:blur(18px) saturate(130%); -webkit-backdrop-filter:blur(18px) saturate(130%);
 }
 .brand { border:0; background:transparent; display:flex; align-items:center; gap:10px; min-height:48px; padding:4px; cursor:pointer; }
-.brand-mark { display:grid; place-items:center; width:39px; height:39px; border-radius:13px; background:var(--accent); color:#07150f; font:700 23px Georgia,serif; box-shadow:0 7px 20px rgba(69,193,152,.22); }
+.brand-mark { display:grid; place-items:center; width:39px; height:39px; border-radius:13px; background:var(--accent); color:#160d29; font:700 23px Georgia,serif; box-shadow:0 7px 20px rgba(167,139,250,.24); }
 .brand-copy { display:flex; flex-direction:column; align-items:flex-start; line-height:1.05; }
 .brand-copy strong { font:700 19px Georgia,serif; }
 .brand-copy small { color:var(--muted); font-size:10px; letter-spacing:.13em; text-transform:uppercase; margin-top:4px; }
@@ -99,7 +99,7 @@ a { color:var(--accent); }
 .dock button:hover,.dock button.on { background:var(--accent-soft); color:var(--accent); }
 .dock button span { font-size:22px; line-height:1; }
 .dock button small { font-size:9.5px; font-weight:700; }
-.orb-mini { width:24px; height:24px; border-radius:50%; display:block; background:radial-gradient(circle at 35% 30%,#d9fff2 0 7%,var(--accent) 24%,#207d65 68%,#102b26); box-shadow:0 0 15px rgba(69,193,152,.6); }
+.orb-mini { width:24px; height:24px; border-radius:50%; display:block; background:radial-gradient(circle at 35% 30%,#efe8ff 0 7%,var(--accent) 24%,#6d43c9 68%,#241a3a); box-shadow:0 0 15px rgba(167,139,250,.6); }
 
 .btn { min-height:46px; border:1px solid var(--border); border-radius:13px; background:var(--surface-overlay); color:var(--text); padding:9px 15px; display:inline-flex; align-items:center; justify-content:center; gap:8px; font-weight:700; cursor:pointer; transition:.16s ease; text-decoration:none; }
 .btn:hover { border-color:var(--border2); transform:translateY(-1px); }
@@ -137,7 +137,7 @@ a { color:var(--accent); }
 .list-item:hover { border-color:var(--border2); }
 .list-item .check { width:24px; height:24px; border:2px solid var(--border2); border-radius:8px; flex:none; display:grid; place-items:center; }
 .list-item.done { opacity:.6; }
-.list-item.done .check { background:var(--accent); border-color:var(--accent); color:#07150f; }
+.list-item.done .check { background:var(--accent); border-color:var(--accent); color:#160d29; }
 .list-item.done .item-title { text-decoration:line-through; }
 .item-main { flex:1; min-width:0; }
 .item-title { font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -239,7 +239,7 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
 .sheet-foot { display:flex; justify-content:flex-end; gap:9px; margin-top:18px; padding-top:14px; border-top:1px solid var(--border); }
 .polaris-sheet { background:linear-gradient(165deg,color-mix(in oklab,var(--surface-overlay) 90%,var(--accent) 10%),var(--surface-overlay)); }
 .polaris-hero { text-align:center; padding:8px 20px 20px; }
-.polaris-orb { width:92px; height:92px; margin:0 auto 15px; border-radius:50%; background:radial-gradient(circle at 35% 30%,#eafff7 0 5%,var(--accent) 20%,#22765f 64%,#102a24); box-shadow:0 0 35px rgba(69,193,152,.55),inset -8px -8px 22px rgba(0,0,0,.3); }
+.polaris-orb { width:92px; height:92px; margin:0 auto 15px; border-radius:50%; background:radial-gradient(circle at 35% 30%,#f3edff 0 5%,var(--accent) 20%,#6a3fc4 64%,#221936); box-shadow:0 0 35px rgba(167,139,250,.55),inset -8px -8px 22px rgba(0,0,0,.3); }
 .polaris-hero h2 { font:700 29px Georgia,serif; margin:0 0 6px; }
 .quick-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin:14px 0; }
 .quick-grid button { min-height:52px; border:1px solid var(--border); border-radius:13px; background:var(--surface-raised); cursor:pointer; text-align:left; padding:10px 12px; }

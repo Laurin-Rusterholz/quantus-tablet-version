@@ -12,7 +12,7 @@ const workspace = fs.readFileSync(path.join(root, "tablet-workspace.js"), "utf8"
 for (const id of ["app", "main", "overlayRoot", "syncDot", "accountButton"]) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
 }
-for (const file of ["styles.css", "tablet-workspace.css", "sync-core.js", "tablet-workspace.js", "app.js", "icon.svg", "manifest.webmanifest"]) {
+for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "app.js", "icon.svg", "manifest.webmanifest"]) {
   assert.equal(fs.existsSync(path.join(root, file)), true, `missing ${file}`);
   assert.match(serviceWorker + html, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${file} is not referenced`);
 }
@@ -49,6 +49,23 @@ for (const feature of ["handwriting", "stickyBoard", "externalLinks", "linkedPro
 }
 assert.match(html, /firebase-storage-compat\.js/, "missing Firebase Storage SDK");
 assert.match(html, /data-action="workspace"/, "missing global workspace launcher");
+
+// Eigenstaendige Tablet-Programme: Homebildschirm, Mail und FlowerTech.
+const springboard = fs.readFileSync(path.join(root, "springboard.js"), "utf8");
+const mailApp = fs.readFileSync(path.join(root, "mail-app.js"), "utf8");
+const flowertechApp = fs.readFileSync(path.join(root, "flowertech-app.js"), "utf8");
+for (const source of [springboard, mailApp, flowertechApp]) {
+  assert.match(source, /__quantusTabletModules/, "tablet modules must register themselves");
+}
+assert.match(app, /tabletModules\(\)/, "app.js must dispatch to the tablet modules");
+assert.match(springboard, /sb-dock/, "springboard needs a dock");
+assert.match(springboard, /sb-grid/, "springboard needs an icon grid");
+assert.match(mailApp, /gmail-api/, "mail must use the existing Quantus gmail proxy");
+for (const feature of ["mail-reply", "mail-forward", "mail-archive", "mail-trash", "mail-compose"]) {
+  assert.match(mailApp, new RegExp(feature), `mail is missing ${feature}`);
+}
+assert.match(flowertechApp, /flowertech-doc/, "FlowerTech needs its document form");
+assert.match(html, /data-route="mail"/, "mail must be reachable from the dock");
 
 // Speicher- und Produktivitaets-Verbesserungen muessen verdrahtet bleiben.
 const syncCore = fs.readFileSync(path.join(root, "sync-core.js"), "utf8");

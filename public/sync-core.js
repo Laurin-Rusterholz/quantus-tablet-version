@@ -68,6 +68,7 @@
       },
       dailyBriefing: { routines: [], beliefs: [] },
       recallLabData: { decks: [], cards: [], reviewLogs: [] },
+      flowertech: { offers: [], invoices: [], finances: [], notes: [], links: [], counters: {}, company: {} },
       meta: {}
     };
   }
@@ -85,6 +86,14 @@
     if (!Array.isArray(payload.recallLabData.decks)) payload.recallLabData.decks = [];
     if (!Array.isArray(payload.recallLabData.reviewLogs)) payload.recallLabData.reviewLogs = [];
     if (!isObject(payload.meta)) payload.meta = {};
+    // FlowerTech liegt ausserhalb von entities (gleiche Struktur wie in AI Sync):
+    // Offerten und Rechnungen sind Dokumentlisten mit Positionen.
+    if (!isObject(payload.flowertech)) payload.flowertech = {};
+    ["offers", "invoices", "finances", "notes", "links"].forEach((key) => {
+      if (!Array.isArray(payload.flowertech[key])) payload.flowertech[key] = [];
+    });
+    if (!isObject(payload.flowertech.counters)) payload.flowertech.counters = {};
+    if (!isObject(payload.flowertech.company)) payload.flowertech.company = {};
     return payload;
   }
 
@@ -186,6 +195,32 @@
     return { applied: true, reason: "flashcard-updated" };
   }
 
+  // FlowerTech-Dokumente (Offerten/Rechnungen). Die Operation traegt das
+  // vollstaendige Dokument in patch.doc; laufende Nummern werden mitgezaehlt.
+  function applyFlowerTechOperation(payload, operation) {
+    const listName = operation.collection === "invoices" ? "invoices" : "offers";
+    const list = payload.flowertech[listName];
+    const index = list.findIndex((item) => item && item.id === operation.id);
+    const existing = index >= 0 ? list[index] : null;
+    if (existing && currentTime(existing) > operationTime(operation)) {
+      return { applied: false, reason: "newer-remote-version" };
+    }
+    if (operation.action === "delete") {
+      if (index >= 0) list.splice(index, 1);
+      return { applied: true, reason: "flowertech-deleted" };
+    }
+    const patch = isObject(operation.patch) ? operation.patch : {};
+    const doc = isObject(patch.doc) ? clone(patch.doc) : {};
+    const merged = { ...(existing || {}), ...doc, id: operation.id, updatedAt: operation.updatedAt };
+    if (index >= 0) list[index] = merged;
+    else list.unshift(merged);
+    if (patch.counterKey) {
+      const current = Number(payload.flowertech.counters[patch.counterKey]) || 0;
+      payload.flowertech.counters[patch.counterKey] = Math.max(current, Number(patch.counterValue) || 0);
+    }
+    return { applied: true, reason: "flowertech-updated" };
+  }
+
   function applyOperation(input, operation) {
     const payload = normalisePayload(input);
     let result;
@@ -193,6 +228,7 @@
     else if (operation.kind === "entity") result = applyEntityOperation(payload, operation);
     else if (operation.kind === "habit") result = applyHabitOperation(payload, operation);
     else if (operation.kind === "flashcard") result = applyFlashcardOperation(payload, operation);
+    else if (operation.kind === "flowertech") result = applyFlowerTechOperation(payload, operation);
     else result = { applied: false, reason: "unsupported-operation" };
 
     if (result.applied) {
@@ -240,8 +276,9 @@
   function isValidOperation(operation) {
     if (!isObject(operation)) return false;
     if (!operation.id || typeof operation.id !== "string") return false;
-    if (!["entity", "habit", "flashcard"].includes(operation.kind)) return false;
+    if (!["entity", "habit", "flashcard", "flowertech"].includes(operation.kind)) return false;
     if (operation.kind === "entity" && (!operation.collection || typeof operation.collection !== "string")) return false;
+    if (operation.kind === "flowertech" && !["offers", "invoices"].includes(operation.collection)) return false;
     if (operation.action && !["create", "update", "delete"].includes(operation.action)) return false;
     if (operation.patch != null && !isObject(operation.patch)) return false;
     return true;
@@ -324,6 +361,19 @@
       if (!logs.has(key)) logs.set(key, clone(log));
     });
     merged.recallLabData.reviewLogs = Array.from(logs.values());
+    // FlowerTech: Dokumente und Buchungen nach Id zusammenfuehren, laufende
+    // Nummern auf den hoeheren Stand heben, damit nichts doppelt vergeben wird.
+    merged.flowertech = { ...clone(a.flowertech), ...clone(b.flowertech) };
+    ["offers", "invoices", "finances", "notes", "links"].forEach((key) => {
+      merged.flowertech[key] = mergeById(a.flowertech[key], b.flowertech[key]);
+    });
+    merged.flowertech.counters = { ...clone(a.flowertech.counters) };
+    Object.keys(b.flowertech.counters || {}).forEach((key) => {
+      merged.flowertech.counters[key] = Math.max(
+        Number(a.flowertech.counters[key]) || 0,
+        Number(b.flowertech.counters[key]) || 0
+      );
+    });
     merged.meta = parseTime(a.meta.updatedAt) >= parseTime(b.meta.updatedAt) ? clone(a.meta) : clone(b.meta);
     return merged;
   }

@@ -187,4 +187,46 @@ function op(overrides = {}) {
   assert.ok(core.estimateSize("äöü") >= 6);
 }
 
-console.log("sync-core: 15 tests passed");
+// FlowerTech: Offerten und Rechnungen werden ueber dieselbe Transaktion
+// gespeichert wie alle anderen Tablet-Aenderungen.
+{
+  const payload = core.makeEmptyPayload();
+  const doc = {
+    id: "off-1", kind: "offer", number: "OF-2026-0001", status: "draft",
+    items: [{ id: "p1", description: "Website", qty: 1, unit: "Pauschal", price: 4800 }],
+    vatRate: 8.1
+  };
+  const result = core.applyOperation(payload, op({
+    kind: "flowertech", collection: "offers", id: "off-1", action: "create",
+    patch: { doc, counterKey: "offer_2026", counterValue: 1 }
+  }));
+  assert.equal(result.applied, true);
+  assert.equal(result.payload.flowertech.offers.length, 1);
+  assert.equal(result.payload.flowertech.offers[0].number, "OF-2026-0001");
+  assert.equal(result.payload.flowertech.counters.offer_2026, 1);
+
+  const removed = core.applyOperation(result.payload, op({
+    kind: "flowertech", collection: "offers", id: "off-1", action: "delete",
+    updatedAt: "2026-07-21T10:00:00.000Z", patch: {}
+  }));
+  assert.equal(removed.applied, true);
+  assert.equal(removed.payload.flowertech.offers.length, 0);
+
+  assert.equal(core.isValidOperation(op({ kind: "flowertech", collection: "offers", id: "x" })), true);
+  assert.equal(core.isValidOperation(op({ kind: "flowertech", collection: "unknown", id: "x" })), false);
+}
+
+// Backups fuehren FlowerTech-Dokumente feldweise zusammen.
+{
+  const local = core.makeEmptyPayload();
+  local.flowertech.invoices.push({ id: "inv-1", number: "RE-2026-0001", updatedAt: "2026-07-20T08:00:00.000Z" });
+  local.flowertech.counters.invoice_2026 = 1;
+  const backup = core.makeEmptyPayload();
+  backup.flowertech.invoices.push({ id: "inv-2", number: "RE-2026-0002", updatedAt: "2026-07-20T09:00:00.000Z" });
+  backup.flowertech.counters.invoice_2026 = 2;
+  const merged = core.mergePayloads(local, backup);
+  assert.equal(merged.flowertech.invoices.length, 2);
+  assert.equal(merged.flowertech.counters.invoice_2026, 2);
+}
+
+console.log("sync-core: 17 tests passed");

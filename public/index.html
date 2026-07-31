@@ -12,6 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="tablet-workspace.css">
+  <link rel="stylesheet" href="apps.css">
   <script>
     (function () {
       try {
@@ -50,7 +51,7 @@
     <nav class="dock" aria-label="Hauptnavigation">
       <button data-action="go" data-route="home" data-dock="home"><span>⌂</span><small>Home</small></button>
       <button data-action="go" data-route="daily" data-dock="daily"><span>☀</span><small>Heute</small></button>
-      <button data-action="go" data-route="reading" data-dock="reading"><span>▤</span><small>Lesen</small></button>
+      <button data-action="go" data-route="mail" data-dock="mail"><span>✉</span><small>Mail</small></button>
       <button class="polaris-dock" data-action="polaris"><span class="orb-mini"></span><small>Polaris</small></button>
       <button data-action="go" data-route="notes" data-dock="notes"><span>✎</span><small>Noteflow</small></button>
       <button data-action="go" data-route="tasks" data-dock="tasks"><span>✓</span><small>Aufgaben</small></button>
@@ -69,6 +70,9 @@
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
   <script src="sync-core.js"></script>
   <script src="tablet-workspace.js"></script>
+  <script src="springboard.js"></script>
+  <script src="mail-app.js"></script>
+  <script src="flowertech-app.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
