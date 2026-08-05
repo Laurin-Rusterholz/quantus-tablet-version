@@ -1,5 +1,11 @@
-const CACHE = "quantus-tablet-v5-apps";
-const SHELL = ["/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css", "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/flowertech-app.js", "/app.js", "/icon.svg", "/manifest.webmanifest"];
+const CACHE = "quantus-tablet-v6-live-career";
+const SHELL = [
+  "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
+  "/quantus-tablet-expansion.css",
+  "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/flowertech-app.js", "/app.js",
+  "/quantus-tablet-expansion.js",
+  "/icon.svg", "/manifest.webmanifest"
+];
 const NETWORK_TIMEOUT_MS = 3500;
 
 self.addEventListener("install", (event) => {
@@ -22,8 +28,6 @@ function fetchWithTimeout(request, ms) {
   });
 }
 
-// Navigationen: Netz zuerst, aber mit hartem Timeout – bei langsamer oder
-// fehlender Verbindung startet die App sofort aus dem Cache.
 async function networkFirst(request) {
   try {
     const response = await fetchWithTimeout(request, NETWORK_TIMEOUT_MS);
@@ -37,8 +41,6 @@ async function networkFirst(request) {
   }
 }
 
-// Statische Dateien: sofort aus dem Cache antworten und im Hintergrund
-// aktualisieren (stale-while-revalidate) – schnelle Starts, frische Dateien.
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE);
   const cached = await cache.match(request);
