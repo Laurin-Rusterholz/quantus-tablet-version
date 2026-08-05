@@ -161,12 +161,14 @@
   function renderHomeExpansion() {
     var springboard = global.document.querySelector(".springboard");
     if (!springboard) return;
+    var markup = hubHtml();
     var existing = springboard.querySelector("#quantusLearningHub");
-    if (existing) existing.outerHTML = hubHtml();
-    else {
+    if (existing) {
+      if (existing.outerHTML !== markup) existing.outerHTML = markup;
+    } else {
       var top = springboard.querySelector(".sb-top");
-      if (top) top.insertAdjacentHTML("afterend", hubHtml());
-      else springboard.insertAdjacentHTML("afterbegin", hubHtml());
+      if (top) top.insertAdjacentHTML("afterend", markup);
+      else springboard.insertAdjacentHTML("afterbegin", markup);
     }
     injectCareerIcon(springboard);
   }
