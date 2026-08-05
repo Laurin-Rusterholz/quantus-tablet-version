@@ -23,6 +23,8 @@
   --topbar:64px;
   --dock:82px;
   --safe-bottom:env(safe-area-inset-bottom,0px);
+  /* Nutzbare Hoehe des scrollenden Inhalts zwischen Kopfzeile und Dock. */
+  --content-h:calc(100vh - var(--topbar) - var(--dock) - var(--safe-bottom) - env(safe-area-inset-top,0px) - 58px);
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",sans-serif;
 }
 
@@ -57,12 +59,15 @@ a { color:var(--accent); }
 .nowrap { white-space:nowrap; }
 .truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-.app-shell { min-height:100vh; }
+/* Die Huelle ist ein festes Raster: Kopfzeile, scrollender Inhalt, Dock.
+   Kopfzeile und Dock liegen dadurch nicht mehr ueber dem Inhalt, sondern
+   neben ihm. Auf dem Tablet war genau das der Grund, weshalb Kacheln und
+   Symbole unter den Leisten nicht mehr auf Beruehrungen reagiert haben. */
+.app-shell { position:fixed; inset:0; display:flex; flex-direction:column; overflow:hidden; }
 .topbar {
-  position:fixed; inset:0 0 auto 0; height:calc(var(--topbar) + env(safe-area-inset-top,0px)); z-index:40;
+  flex:0 0 auto; height:calc(var(--topbar) + env(safe-area-inset-top,0px)); z-index:40;
   padding:env(safe-area-inset-top,0px) 18px 0; display:flex; align-items:center; gap:18px;
-  background:color-mix(in oklab,var(--surface-raised) 88%,transparent); border-bottom:1px solid var(--border);
-  backdrop-filter:blur(18px) saturate(130%); -webkit-backdrop-filter:blur(18px) saturate(130%);
+  background:var(--surface-raised); border-bottom:1px solid var(--border);
 }
 .brand { border:0; background:transparent; display:flex; align-items:center; gap:10px; min-height:48px; padding:4px; cursor:pointer; }
 .brand-mark { display:grid; place-items:center; width:39px; height:39px; border-radius:13px; background:var(--accent); color:#160d29; font:700 23px Georgia,serif; box-shadow:0 7px 20px rgba(167,139,250,.24); }
@@ -82,7 +87,7 @@ a { color:var(--accent); }
 .status-dot.syncing { background:var(--warning); animation:pulse 1.3s infinite; }
 .status-dot.error { background:var(--danger); }
 
-.main { min-height:100vh; padding:calc(var(--topbar) + env(safe-area-inset-top,0px) + 22px) 22px calc(var(--dock) + var(--safe-bottom) + 30px); }
+.main { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; padding:22px 22px 26px; }
 .view { max-width:1480px; margin:0 auto; animation:fadein .2s ease; }
 .view-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin:0 2px 22px; }
 .view-head h1 { font:700 clamp(28px,4vw,44px)/1.05 Georgia,serif; margin:0 0 5px; letter-spacing:-.025em; }
@@ -90,10 +95,10 @@ a { color:var(--accent); }
 .head-actions,.row-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 
 .dock {
-  position:fixed; z-index:45; left:50%; bottom:calc(10px + var(--safe-bottom)); transform:translateX(-50%);
+  flex:0 0 auto; z-index:45; margin:0 auto calc(10px + var(--safe-bottom));
   width:min(850px,calc(100vw - 24px)); height:72px; padding:7px 10px; display:grid; grid-template-columns:repeat(8,1fr); gap:3px;
-  background:color-mix(in oklab,var(--surface-overlay) 88%,transparent); border:1px solid var(--border2); border-radius:23px;
-  box-shadow:var(--shadow); backdrop-filter:blur(22px) saturate(130%); -webkit-backdrop-filter:blur(22px) saturate(130%);
+  background:var(--surface-overlay); border:1px solid var(--border2); border-radius:23px;
+  box-shadow:var(--shadow);
 }
 .dock button { border:0; background:transparent; border-radius:16px; min-width:0; min-height:56px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; color:var(--muted); transition:.16s ease; }
 .dock button:hover,.dock button.on { background:var(--accent-soft); color:var(--accent); }
@@ -199,15 +204,15 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
 .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .form-grid .full { grid-column:1/-1; }
 
-.reading-layout { display:grid; grid-template-columns:minmax(240px,320px) minmax(0,1fr); min-height:calc(100vh - 190px); gap:14px; }
+.reading-layout { display:grid; grid-template-columns:minmax(240px,320px) minmax(0,1fr); min-height:var(--content-h); gap:14px; }
 .library-panel,.reader-panel { border:1px solid var(--border); background:var(--surface-raised); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow-soft); }
 .panel-head { min-height:58px; display:flex; align-items:center; gap:9px; padding:10px 13px; border-bottom:1px solid var(--border); }
 .panel-head strong { flex:1; }
-.library-list { padding:10px; max-height:calc(100vh - 265px); overflow:auto; }
+.library-list { padding:10px; max-height:calc(var(--content-h) - 76px); overflow:auto; }
 .doc-row { padding:11px; border-radius:12px; cursor:pointer; border:1px solid transparent; margin-bottom:5px; }
 .doc-row:hover,.doc-row.on { background:var(--accent-soft); border-color:color-mix(in oklab,var(--accent) 36%,transparent); }
 .reader-empty { min-height:500px; display:grid; place-items:center; text-align:center; color:var(--muted); padding:30px; }
-.reader-content { height:calc(100vh - 250px); overflow:auto; padding:24px clamp(18px,4vw,54px); user-select:text; }
+.reader-content { height:calc(var(--content-h) - 62px); overflow:auto; padding:24px clamp(18px,4vw,54px); user-select:text; }
 .reader-content article { max-width:850px; margin:0 auto; font:18px/1.72 Georgia,serif; }
 .reader-content h1 { font-size:34px; line-height:1.1; }
 .reader-content iframe { width:100%; height:100%; border:0; background:#fff; border-radius:10px; }
@@ -254,11 +259,11 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
 .detail-block small { color:var(--muted); display:block; }
 .detail-block strong { display:block; margin-top:5px; overflow-wrap:anywhere; }
 
-.split-layout { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:calc(100vh - 190px); }
+.split-layout { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:var(--content-h); }
 .split-pane { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:var(--surface-raised); }
 .split-pane-head { height:58px; border-bottom:1px solid var(--border); padding:8px 10px; display:flex; align-items:center; gap:8px; }
 .split-pane-head select { width:auto; flex:1; }
-.split-pane-body { padding:12px; height:calc(100vh - 250px); overflow:auto; }
+.split-pane-body { padding:12px; height:calc(var(--content-h) - 62px); overflow:auto; }
 
 .toasts { position:fixed; z-index:110; top:calc(var(--topbar) + 12px); right:14px; width:min(370px,calc(100vw - 28px)); display:flex; flex-direction:column; gap:8px; }
 .toast { padding:12px 14px; border:1px solid var(--border2); border-left:4px solid var(--blue); background:var(--surface-overlay); border-radius:13px; box-shadow:var(--shadow); animation:toastin .2s ease; }
@@ -284,7 +289,7 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
   .view-head h1 { font-size:30px; }
   .dashboard-grid { grid-template-columns:1fr; }
   .widget.span-3,.widget.span-4,.widget.span-5,.widget.span-6,.widget.span-7,.widget.span-8,.widget.span-12 { grid-column:1; }
-  .dock { grid-template-columns:repeat(7,1fr); bottom:calc(6px + var(--safe-bottom)); height:68px; padding:5px; }
+  .dock { grid-template-columns:repeat(7,1fr); margin-bottom:calc(6px + var(--safe-bottom)); height:68px; padding:5px; }
   .dock button:nth-child(2) { display:none; }
   .dock button small { font-size:8.5px; }
   .dock button span { font-size:20px; }
@@ -315,9 +320,10 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
   .sync-details { grid-template-columns:1fr; }
 }
 
-@media (display-mode:standalone) {
-  .topbar { background:var(--surface-raised); }
-}
+/* Der Geraeteknopf der gemeinsamen Quantus-Oberflaeche sitzt sonst genau auf
+   dem Dock und verdeckt dessen Knoepfe auf schmalen Tablets. */
+#quantusDeviceUi { bottom:calc(var(--dock) + var(--safe-bottom) + 18px) !important; pointer-events:none; }
+#quantusDeviceUi > * { pointer-events:auto; }
 
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }

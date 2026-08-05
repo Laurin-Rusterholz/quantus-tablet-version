@@ -1125,11 +1125,16 @@
     <p class="muted small" style="margin-top:10px">Der Snapshot lädt deine Daten beim Start sofort – auch offline. Das Backup enthält zusätzlich die Offline-Warteschlange und lässt sich hier feldweise wieder einspielen.</p>`;
   }
 
+  let renderedRoute = null;
+
   function render() {
     state.route = getRoute();
     viewTitle.textContent = ROUTE_TITLES[state.route] || "Quantus";
     document.querySelectorAll("[data-dock]").forEach((button) => button.classList.toggle("on", button.dataset.dock === state.route));
     main.innerHTML = renderRoute(state.route);
+    // Beim Wechsel der Ansicht oben beginnen, sonst landet man mitten in der
+    // neuen Seite. Bei reinen Datenaktualisierungen bleibt die Position.
+    if (renderedRoute !== state.route) { renderedRoute = state.route; main.scrollTop = 0; }
     updateAccountButton();
     window.QuantusTabletWorkspace?.mountRoute?.();
     const mounted = moduleFor(state.route);
@@ -1182,14 +1187,29 @@
     }
   }
 
+  // Auf dem Tablet (installierte App, Popup-Blocker, Kiosk-Modus) liefert
+  // window.open haeufig kein Fenster zurueck. Dann wirkt der Knopf wirkungslos.
+  // Deshalb wird in diesem Fall im selben Fenster geoeffnet.
+  function openWindow(url) {
+    let opened = null;
+    try { opened = window.open(url, "_blank"); } catch (_) { opened = null; }
+    if (opened) {
+      try { opened.opener = null; } catch (_) {}
+      return true;
+    }
+    toast("Wird geoeffnet", "Das Tablet erlaubt kein zweites Fenster – die Seite oeffnet hier.", "ok");
+    try { location.assign(url); } catch (_) {}
+    return false;
+  }
+
   function openExternal(path) {
     const clean = String(path || "").replace(/^\/+/, "");
-    window.open(`${appBaseUrl()}/${clean}`, "_blank", "noopener,noreferrer");
+    openWindow(`${appBaseUrl()}/${clean}`);
   }
 
   function openExternalUrl(url) {
     if (!/^https?:\/\//i.test(url || "")) return;
-    window.open(url, "_blank", "noopener,noreferrer");
+    openWindow(url);
   }
 
   function closeOverlay() {

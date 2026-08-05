@@ -214,16 +214,21 @@
         return '<section class="sb-page"><div class="sb-page-title">' + esc(page.title) + "</div>" +
           '<div class="sb-grid">' + page.apps.map(function (app) { return iconHtml(app, false); }).join("") + "</div></section>";
       }).join("") + "</div>" +
+      '<div class="sb-footer">' +
       '<div class="sb-dots" id="sbDots">' + PAGES.map(function (page, index) {
         return '<button class="sb-dot' + (index === 0 ? " on" : "") + '" data-sb-page="' + index +
           '" aria-label="Seite ' + (index + 1) + '"></button>';
       }).join("") + "</div>" +
       '<div class="sb-dock">' + dock.map(function (app) { return iconHtml(app, true); }).join("") + "</div>" +
-      "</div>";
+      "</div></div>";
   }
 
   var pressTimer = null;
   var lastLongPress = 0;
+  // Ein Tippen auf dem Tablet dauert schnell einmal eine halbe Sekunde. Erst ab
+  // dieser Dauer und nur ohne Fingerbewegung gilt es als langer Druck.
+  var LONG_PRESS_MS = 750;
+  var MOVE_TOLERANCE = 12;
 
   function toggleDock(key) {
     var list = loadDock();
@@ -259,16 +264,25 @@
       });
     }
     root.querySelectorAll(".sb-app").forEach(function (button) {
-      var start = function () {
-        clearTimeout(pressTimer);
+      var origin = null;
+      var cancel = function () { clearTimeout(pressTimer); pressTimer = null; origin = null; };
+      var start = function (event) {
+        cancel();
+        origin = { x: event.clientX, y: event.clientY };
         pressTimer = setTimeout(function () {
+          pressTimer = null;
           button.classList.add("jiggle");
           setTimeout(function () { button.classList.remove("jiggle"); }, 500);
           toggleDock(button.dataset.sbKey);
-        }, 550);
+        }, LONG_PRESS_MS);
       };
-      var cancel = function () { clearTimeout(pressTimer); };
+      var move = function (event) {
+        // Wischen zum Blaettern oder Scrollen darf kein Dock-Umlegen ausloesen.
+        if (!origin) return;
+        if (Math.abs(event.clientX - origin.x) > MOVE_TOLERANCE || Math.abs(event.clientY - origin.y) > MOVE_TOLERANCE) cancel();
+      };
       button.addEventListener("pointerdown", start);
+      button.addEventListener("pointermove", move);
       button.addEventListener("pointerup", cancel);
       button.addEventListener("pointerleave", cancel);
       button.addEventListener("pointercancel", cancel);

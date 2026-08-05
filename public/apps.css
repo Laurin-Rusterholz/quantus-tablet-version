@@ -6,8 +6,7 @@
 
 /* ── Springboard ─────────────────────────────────────────────────────────── */
 .springboard {
-  padding: 14px 26px 210px;
-  min-height: calc(100vh - var(--topbar) - var(--dock));
+  padding: 14px 26px 26px;
   background:
     radial-gradient(110% 70% at 10% 0%, color-mix(in oklab, var(--accent) 15%, transparent), transparent 60%),
     radial-gradient(90% 60% at 92% 6%, color-mix(in oklab, var(--blue) 14%, transparent), transparent 56%);
@@ -80,27 +79,27 @@
 .tone-pink   { background: linear-gradient(160deg, #e879a9, #b0497a); }
 .tone-grey   { background: linear-gradient(160deg, var(--surface-overlay), var(--border2)); }
 
-.sb-dots { position: fixed; left: 0; right: 0; z-index: 31;
-  bottom: calc(var(--dock) + var(--safe-bottom) + 106px);
-  display: flex; justify-content: center; gap: 8px; }
-.sb-dot { width: 8px; height: 8px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+/* Seitenpunkte und Favoritendock stehen im Fluss unter den Symbolseiten.
+   Frueher schwebten sie fest ueber dem Homebildschirm und haben dabei die
+   Symbole darunter verdeckt — diese Symbole liessen sich dann nicht mehr
+   antippen. */
+.sb-footer { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: 26px; }
+.sb-dots { display: flex; justify-content: center; gap: 8px; }
+.sb-dot { width: 10px; height: 10px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
   background: color-mix(in oklab, var(--muted) 55%, transparent); transition: .16s ease; }
 .sb-dot.on { background: var(--text); transform: scale(1.2); }
 
 .sb-dock {
-  position: fixed; left: 50%; transform: translateX(-50%); z-index: 30;
-  bottom: calc(var(--dock) + var(--safe-bottom) + 10px);
   display: flex; gap: 14px; padding: 12px 16px; border-radius: 28px;
   border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--surface-overlay) 78%, transparent);
-  backdrop-filter: blur(20px) saturate(1.3); -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  background: var(--surface-overlay);
   box-shadow: var(--shadow);
 }
 .sb-dock .sb-label { display: none; }
 .sb-dock .sb-icon { width: 56px; height: 56px; border-radius: 17px; }
 
 @media (max-width: 900px) {
-  .springboard { padding: 16px 16px 230px; }
+  .springboard { padding: 16px 16px 26px; }
   .sb-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .sb-widgets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sb-widget, .sb-widget.wide { grid-column: span 1; }
@@ -131,7 +130,7 @@
   overflow: hidden; min-height: 320px;
 }
 .mail-pane-detail { padding: 22px 24px; }
-.mail-list { display: flex; flex-direction: column; max-height: calc(100vh - var(--topbar) - var(--dock) - 120px); overflow-y: auto; }
+.mail-list { display: flex; flex-direction: column; max-height: calc(var(--content-h) - 30px); overflow-y: auto; }
 .mail-row {
   display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
   border-bottom: 1px solid var(--border); cursor: pointer; transition: .12s ease;
