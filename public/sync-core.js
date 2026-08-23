@@ -234,6 +234,13 @@
     if (result.applied) {
       payload.meta.updatedAt = operation.updatedAt;
       payload.meta.lastTabletOperationId = operation.operationId || operation.id;
+      // meta.lastSavedBy ist der einzige Fremdgeraete-Marker, den AI Sync
+      // auswertet (ai-sync public/index.html:10744/10751 und 6774-6776).
+      // savedBy im Wrapper reicht dafuer nicht: der Desktop liest das Feld
+      // aus dem Datenstand, nicht aus der Huelle. Ohne eigenen Wert blieb
+      // dort die Geraete-Id des Desktops stehen, er hielt den Stand fuer
+      // selbst geschrieben und uebersprang den Schutz-Merge.
+      payload.meta.lastSavedBy = "tablet-app";
     }
     return { payload, ...result };
   }

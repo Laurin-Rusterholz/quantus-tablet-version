@@ -44,6 +44,20 @@ function op(overrides = {}) {
   assert.equal(result.payload.entities.tasks["task-1"].title, "Neuere Desktop-Version");
 }
 
+// meta.lastSavedBy ist der Fremdgeraete-Marker fuer AI Sync. Fehlt er, haelt
+// der Desktop einen Tablet-Schreibvorgang fuer seinen eigenen und ueberschreibt
+// ihn beim naechsten Speichern.
+{
+  const payload = core.makeEmptyPayload();
+  payload.meta.lastSavedBy = "dev_abc123_xyz";
+  const result = core.applyOperation(payload, op());
+  assert.equal(result.applied, true);
+  assert.equal(result.payload.meta.lastSavedBy, "tablet-app");
+  const abgelehnt = core.applyOperation(result.payload, op({ updatedAt: "2026-07-20T09:00:00.000Z" }));
+  assert.equal(abgelehnt.applied, false);
+  assert.equal(abgelehnt.payload.meta.lastSavedBy, "tablet-app");
+}
+
 {
   const payload = core.makeEmptyPayload();
   payload.entities.notes.n1 = { id: "n1", title: "Notiz", updatedAt: "2026-07-20T08:00:00.000Z" };
@@ -229,4 +243,4 @@ function op(overrides = {}) {
   assert.equal(merged.flowertech.counters.invoice_2026, 2);
 }
 
-console.log("sync-core: 17 tests passed");
+console.log("sync-core: 18 tests passed");
