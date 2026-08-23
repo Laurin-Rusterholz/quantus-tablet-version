@@ -89,9 +89,12 @@ function op(overrides = {}) {
 }
 
 {
-  const inbox = core.toInboxRecord(op({ collection: "meetings", id: "m1" }));
-  assert.equal(inbox.type, "meeting");
-  assert.equal(inbox.record.source, "quantus-tablet");
+  // Der Spiegel nach polaris/inbox ist entfernt (F-23): das Tablet schreibt
+  // ausschliesslich kanonisch per Transaktion. toInboxRecord und die nur dafuer
+  // gepflegte Sammlung->Typ-Tabelle ENTITY_TYPES sind damit toter Code.
+  // Verhalten dazu in tests/no-inbox-mirror.test.cjs.
+  assert.equal(core.toInboxRecord, undefined);
+  assert.equal(core.ENTITY_TYPES, undefined);
 }
 
 {
@@ -118,7 +121,6 @@ function op(overrides = {}) {
   const payload = core.makeEmptyPayload();
   const result = core.applyOperation(payload, op({ collection: "organizations", id: "o1", patch: { name: "Organisation", files: [{ id: "f1", storagePath: "attachments/organization/o1/test.pdf" }] } }));
   assert.equal(result.payload.entities.organizations.o1.files[0].id, "f1");
-  assert.equal(core.toInboxRecord(op({ collection: "organizations", id: "o1" })).type, "organization");
 }
 
 // ── Speicher-Verbesserungen: Validierung, Warteschlangen-Verdichtung,

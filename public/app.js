@@ -547,7 +547,6 @@
     try {
       const result = await transactionOperation(operation);
       if (!result.committed) throw new Error("Die Firebase-Transaktion wurde nicht bestätigt.");
-      await mirrorOperation(operation);
       state.pending = state.pending.filter((item) => item.operationId !== operation.operationId);
       saveJson(LOCAL_KEYS.pending, state.pending);
       state.lastSync = new Date();
@@ -561,6 +560,17 @@
     }
   }
 
+  // Der kanonische Knoten ist der EINZIGE Schreibweg des Tablets. Frueher lief
+  // nach jeder Transaktion zusaetzlich ein Spiegel nach polaris/inbox
+  // (mirrorOperation) — als "doppeltes Netz" gegen eine aeltere
+  // Desktop-Speicherung. Das ist seit S4b hinfaellig und war zuletzt selbst das
+  // Risiko: der Desktop las die Inbox als eigenstaendige Quelle und legte aus
+  // einem Spiegelsatz eine zweite Notiz an (F-23). Ausserdem feuerte der Spiegel
+  // auch dann, wenn die Transaktion die Operation als veraltet ABGELEHNT hatte —
+  // der Updater gibt in dem Fall den unveraenderten Stand zurueck, die
+  // Transaktion committet trotzdem, und applied wurde nie geprueft. Damit trug
+  // ein bereits verworfener Stand ueber die Inbox doch noch ins Modell.
+  // polaris/inbox ist ausschliesslich der n8n-/Voice-Eingang.
   function transactionOperation(operation) {
     const ref = db.ref(APP_STORE_PATH);
     return new Promise((resolve, reject) => {
@@ -576,12 +586,6 @@
     });
   }
 
-  async function mirrorOperation(operation) {
-    const inbox = Core.toInboxRecord(operation);
-    if (!inbox) return;
-    await db.ref(`polaris/inbox/${inbox.type}/${operation.id}`).set(inbox.record);
-  }
-
   async function flushPending() {
     if (!state.user || !db || !navigator.onLine || !state.pending.length || state.syncStatus === "syncing") return;
     state.pending = Core.compactQueue(state.pending);
@@ -591,7 +595,6 @@
     for (const operation of queue) {
       try {
         await transactionOperation(operation);
-        await mirrorOperation(operation);
         state.pending = state.pending.filter((item) => item.operationId !== operation.operationId);
         saveJson(LOCAL_KEYS.pending, state.pending);
       } catch (error) {

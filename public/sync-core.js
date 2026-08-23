@@ -5,26 +5,6 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  const ENTITY_TYPES = {
-    tasks: "task",
-    projects: "project",
-    notes: "note",
-    meetings: "meeting",
-    calendarEvents: "event",
-    persons: "person",
-    concepts: "concept",
-    ideas: "idea",
-    strategies: "strategy",
-    goals: "goal",
-    decisions: "decision",
-    organizations: "organization",
-    programs: "program",
-    articles: "article",
-    protocols: "protocol",
-    workflows: "workflow",
-    theses: "thesis"
-  };
-
   function clone(value) {
     if (value == null) return value;
     if (typeof structuredClone === "function") {
@@ -255,24 +235,6 @@
     };
   }
 
-  function toInboxRecord(operation) {
-    if (!operation) return null;
-    const base = {
-      ...(isObject(operation.patch) ? clone(operation.patch) : {}),
-      id: operation.id,
-      ts: operationTime(operation),
-      updatedAt: operation.updatedAt,
-      op: operation.action === "delete" ? "delete" : (operation.action === "create" ? "create" : "update"),
-      source: "quantus-tablet"
-    };
-    if (operation.kind === "entity") {
-      const type = ENTITY_TYPES[operation.collection];
-      return type ? { type, record: base } : null;
-    }
-    if (operation.kind === "habit") return { type: "habit", record: base };
-    return null;
-  }
-
   function makeId(prefix) {
     const random = typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -416,13 +378,11 @@
   }
 
   return {
-    ENTITY_TYPES,
     makeEmptyPayload,
     normalisePayload,
     parseWrapper,
     applyOperation,
     buildWrapper,
-    toInboxRecord,
     makeId,
     isValidOperation,
     compactQueue,
