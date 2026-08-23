@@ -63,10 +63,16 @@ zurückgeschrieben. Jede Änderung läuft als Firebase-Transaktion gegen den
 aktuellsten Serverstand. Dabei gilt pro Objekt eine
 Last-Write-Wins-Prüfung über `updatedAt`.
 
-Zusätzlich werden kompatible Entitätsänderungen unter
-`polaris/inbox/<type>/<id>` gespiegelt. Die bestehende AI-Sync-App verarbeitet
-diese Inbox bereits. Dieses doppelte Netz verhindert, dass eine ältere
-Desktop-Speicherung eine Tablet-Änderung dauerhaft verdrängt.
+Dieser Knoten ist der einzige Schreibweg des Tablets. Es gibt keinen zweiten
+Kanal mehr: früher wurde jede Änderung zusätzlich nach
+`polaris/inbox/<type>/<id>` gespiegelt — als doppeltes Netz gegen eine ältere
+Desktop-Speicherung. Seit der Desktop beim Anmelden nicht mehr blind pusht und
+`mergeData` fremde Bereiche erhält, ist dieses Netz überflüssig und war zuletzt
+selbst das Risiko: die AI-Sync-App liest `polaris/inbox` als eigenständige
+Quelle und legte aus einem Spiegelsatz eine zweite Notiz an.
+
+`polaris/inbox` ist ausschliesslich der Eingang für n8n und den Sprachmodus.
+Das Tablet schreibt dort nicht.
 
 Offline ausgeführte Änderungen bleiben lokal in einer Warteschlange und werden
 nach Wiederherstellung der Verbindung in derselben Reihenfolge abgeglichen.

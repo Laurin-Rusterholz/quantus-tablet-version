@@ -1,4 +1,4 @@
-const CACHE = "quantus-tablet-v8-touch-shell";
+const CACHE = "quantus-tablet-v9-no-mirror";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
   "/quantus-tablet-expansion.css",
