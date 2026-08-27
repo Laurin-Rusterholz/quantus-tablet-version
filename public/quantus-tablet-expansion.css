@@ -4,3 +4,13 @@
 @media(max-width:1050px){.qt-learning-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.qt-learning-card{grid-column:span 2}.qt-learning-card:nth-child(4),.qt-learning-card:nth-child(5){grid-column:span 3}}
 @media(max-width:720px){.qt-learning-hub{padding:13px}.qt-learning-head{flex-direction:column;gap:9px}.qt-device-summary{width:100%}.qt-learning-grid{grid-template-columns:1fr}.qt-learning-card,.qt-learning-card:nth-child(4),.qt-learning-card:nth-child(5){grid-column:auto}.qt-learning-copy strong{font-size:13px}}
 @media(prefers-reduced-motion:reduce){.qt-learning-card{transition:none}.qt-learning-card:hover{transform:none}}
+
+/* ── Tabletnative Lern-Ansichten (BM, Leseplan, Career Model) ────────────────
+   Die Karten des Lerncockpits sprangen bisher in die Desktop-App. Jetzt fuehren
+   sie in eigene Routen; diese Regeln geben deren Bausteinen ihr Aussehen.
+   Sie ergaenzen die vorhandenen .widget/.item-list-Regeln, ersetzen sie nicht. */
+.qt-route .qt-route-title { font-size: 20px; font-weight: 700; letter-spacing: -.01em; margin: 6px 0 4px; }
+.qt-route .qt-route-number { display: block; font-size: 40px; font-weight: 800; line-height: 1.05; margin: 8px 0 2px; }
+.qt-route .qt-route-empty { color: var(--muted, #8b94a3); font-size: 14px; padding: 8px 0 4px; }
+.qt-bar { height: 6px; border-radius: 4px; background: rgba(255, 255, 255, .10); overflow: hidden; margin: 8px 0 4px; }
+.qt-bar-fill { height: 100%; border-radius: 4px; background: currentColor; opacity: .85; }

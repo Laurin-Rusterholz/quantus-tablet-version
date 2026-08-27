@@ -113,6 +113,9 @@
     projects: "Projekte", meetings: "Meetings", habits: "Habits",
     budget: "Budget", split: "Split-Screen", polaris: "Polaris",
     settings: "Einstellungen", apps: "Alle Apps", workspace: "Tablet Canvas",
+    // Ohne Eintrag hier faellt go() still auf "home" zurueck — genau das sah
+    // auf dem Tablet aus wie "die App laesst sich nicht oeffnen".
+    bm: "BM Vorbereitung", leseplan: "Leseplan", career: "Career Model",
     dashboard: "Dashboard", mail: "Mail", flowertech: "FlowerTech",
     ...Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app.label]))
   };
@@ -144,7 +147,7 @@
   const NATIVE_ROUTES = new Set([
     "home", "dashboard", "mail", "flowertech", "daily", "dailybriefing", "reading",
     "learning", "habits", "budget", "polaris", "concepts", "calendar", "workspace",
-    "split", "settings", "apps",
+    "split", "settings", "apps", "bm", "leseplan", "career",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -810,7 +813,7 @@
     if (!state.selectedDocId && docs.length) state.selectedDocId = docs[0].id;
     const selected = docs.find((doc) => doc.id === state.selectedDocId);
     return `<div class="view">
-      ${viewHeader("Lesen", "Dokumente aus Quantus Drive lesen, markieren und in Wissen umwandeln.", `<button class="btn" data-action="split-with" data-route="reading">◫ Split-Screen</button><button class="btn primary" data-action="external" data-path="drive.html">Quantus Drive öffnen</button>`)}
+      ${viewHeader("Lesen", "Dokumente aus Quantus Drive lesen, markieren und in Wissen umwandeln.", `<button class="btn" data-action="split-with" data-route="reading">◫ Split-Screen</button><button class="btn" data-action="external" data-path="drive.html">↗ Drive in der Vollversion</button>`)}
       ${loginBanner()}
       <div class="reading-layout">
         <aside class="library-panel"><div class="panel-head"><strong>Bibliothek</strong><span class="badge">${docs.length}</span></div><div class="library-list">${docs.map((doc) => `<div class="doc-row ${doc.id === state.selectedDocId ? "on" : ""}" data-action="open-doc" data-id="${attr(doc.id)}"><strong class="truncate" style="display:block">${esc(doc.titel_final || doc.dateiname || "Dokument")}</strong><small class="muted">${esc(doc.bereich || doc.mimeType || "Drive")}</small></div>`).join("") || emptyMini("Noch keine Dokumente in Quantus Drive")}</div></aside>
@@ -842,7 +845,7 @@
       ${loginBanner()}
       <div class="dashboard-grid">
         <section class="widget span-4"><div class="widget-head"><span class="widget-icon">▣</span><h2>Karteikarten</h2></div><div class="hero-title" style="font-size:38px">${due.length}</div><p class="muted">heute fällig · ${cards.length} insgesamt</p><div class="progress"><i style="width:${cards.length ? Math.max(4,Math.min(100,((cards.length-due.length)/cards.length)*100)) : 0}%"></i></div></section>
-        <section class="widget span-8"><div class="widget-head"><span class="widget-icon">▤</span><h2>Smarter – letzter Lernstoff</h2></div>${docEntries.slice(0,3).map(([date,doc]) => `<div class="list-item"><span class="badge accent">${esc(formatDate(date))}</span><div class="item-main"><div class="item-title">${esc(doc.title || doc.titel || "Tageslektion")}</div><div class="item-meta">${asArray(doc.questions).length} Fragen</div></div><button class="icon-action" data-action="external" data-path="index.html#/smarter">↗</button></div>`).join("") || emptyMini("Noch kein Smarter-Dokument geladen")}</section>
+        <section class="widget span-8"><div class="widget-head"><span class="widget-icon">▤</span><h2>Smarter – letzter Lernstoff</h2></div>${docEntries.slice(0,3).map(([date,doc]) => `<div class="list-item"><span class="badge accent">${esc(formatDate(date))}</span><div class="item-main"><div class="item-title">${esc(doc.title || doc.titel || "Tageslektion")}</div><div class="item-meta">${asArray(doc.questions).length} Fragen</div></div><button class="icon-action" data-action="go" data-route="smarter">↗</button></div>`).join("") || emptyMini("Noch kein Smarter-Dokument geladen")}</section>
         <section class="widget span-12"><div class="widget-head"><span class="widget-icon">▣</span><h2>Fällige Karten</h2></div><div class="content-grid">${due.slice(0,12).map((card) => `<article class="entity-card"><span class="badge sand">${esc(card.deckId || "Allgemein")}</span><h3>${esc(card.front || "Vorderseite")}</h3><p>${esc(card.back || "Rückseite")}</p><div class="card-foot"><span class="spacer"></span><button class="btn small-btn" data-action="edit-flashcard" data-id="${attr(card.id)}">Bearbeiten</button></div></article>`).join("") || emptyState("✓","Alles wiederholt","Heute sind keine Karteikarten fällig.")}</div></section>
       </div>
     </div>`;
@@ -974,7 +977,7 @@
     const budgetMax = Math.max(1, budget.income, budget.expense);
     const completion = tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0;
     return `<div class="view">
-      ${viewHeader("Statistiken", "Kennzahlen aus deinem gesamten Quantus-Datenstand – tabletnativ berechnet.", `<button class="btn primary" data-action="external" data-path="index.html#/statistics">↗ Vollversion</button>`)}
+      ${viewHeader("Statistiken", "Kennzahlen aus deinem gesamten Quantus-Datenstand – tabletnativ berechnet.", `<button class="btn" data-action="external" data-path="index.html#/statistics">↗ Vollversion</button>`)}
       ${loginBanner()}
       <div class="budget-metrics">
         <div class="budget-metric"><small>Aufgaben erledigt</small><strong>${completion}%</strong></div>
@@ -998,7 +1001,7 @@
     const activity = recentActivity(40);
     const perType = countBy(activity, (entry) => entry.config.label);
     return `<div class="view">
-      ${viewHeader("Berichte", "Aktueller Bestand und die juengsten Aktualisierungen über alle Quantus-Bereiche.", `<button class="btn primary" data-action="external" data-path="index.html#/reports">↗ Vollversion</button>`)}
+      ${viewHeader("Berichte", "Aktueller Bestand und die juengsten Aktualisierungen über alle Quantus-Bereiche.", `<button class="btn" data-action="external" data-path="index.html#/reports">↗ Vollversion</button>`)}
       ${loginBanner()}
       <div class="budget-metrics">${Object.entries(perType).slice(0, 6).map(([label, value]) => `<div class="budget-metric"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`).join("") || `<div class="budget-metric"><small>Einträge</small><strong>0</strong></div>`}</div>
       <section class="widget"><div class="widget-head"><span class="widget-icon">↻</span><h2>Letzte Aktualisierungen</h2></div><div class="item-list">${activity.map(({ config, item }) => `<div class="list-item"><span class="badge accent">${esc(config.label)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Aktivität – melde dich an, um deine Quantus-Daten zu laden.")}</div></section>
@@ -1076,12 +1079,12 @@
   }
 
   function renderPolaris() {
-    return `<div class="view">${viewHeader("Polaris", "Die zentrale KI-Schicht zwischen deinen Quantus-Apps.", `<button class="btn primary" data-action="external" data-path="index.html#/polaris">Vollständigen Sprachmodus öffnen</button>`)}
+    return `<div class="view">${viewHeader("Polaris", "Die zentrale KI-Schicht zwischen deinen Quantus-Apps.", `<button class="btn" data-action="external" data-path="index.html#/polaris">↗ Sprachmodus in der Vollversion</button>`)}
       <section class="widget hero-widget" style="max-width:900px;margin:0 auto"><div class="polaris-hero"><div class="polaris-orb"></div><h2>Womit soll ich dir helfen?</h2><p class="muted">Schnellbefehle werden direkt auf dem Tablet ausgeführt und mit AI Sync synchronisiert.</p></div>${polarisCommandBox()}</section></div>`;
   }
 
   function polarisCommandBox() {
-    return `<form data-form="polaris"><div class="field"><input name="command" placeholder="Zum Beispiel: Neue Aufgabe: Sitzungsunterlagen lesen" autocomplete="off" required></div><div class="quick-grid"><button type="button" data-action="polaris-quick" data-command="Neue Aufgabe: ">✓ Neue Aufgabe</button><button type="button" data-action="polaris-quick" data-command="Neue Notiz: ">✎ Neue Notiz</button><button type="button" data-action="polaris-quick" data-command="Neues Projekt: ">▧ Neues Projekt</button><button type="button" data-action="external" data-path="index.html#/polaris">✦ Mit Polaris sprechen</button></div><button class="btn primary" type="submit" style="width:100%">Ausführen</button></form>`;
+    return `<form data-form="polaris"><div class="field"><input name="command" placeholder="Zum Beispiel: Neue Aufgabe: Sitzungsunterlagen lesen" autocomplete="off" required></div><div class="quick-grid"><button type="button" data-action="polaris-quick" data-command="Neue Aufgabe: ">✓ Neue Aufgabe</button><button type="button" data-action="polaris-quick" data-command="Neue Notiz: ">✎ Neue Notiz</button><button type="button" data-action="polaris-quick" data-command="Neues Projekt: ">▧ Neues Projekt</button><button type="button" data-action="go" data-route="polaris">✦ Polaris öffnen</button></div><button class="btn primary" type="submit" style="width:100%">Ausführen</button></form>`;
   }
 
   function renderSplit() {
@@ -1152,6 +1155,11 @@
   // laesst sich jederzeit frei zwischen allen Apps wechseln.
   function renderRoute(route) {
     if (route === "workspace") return window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
+    // BM, Leseplan und Career Model werden vom Lern-Hub gerendert — er
+    // abonniert ihre Daten ohnehin schon live. Dasselbe Muster wie beim Canvas.
+    if (route === "bm" || route === "leseplan" || route === "career") {
+      return window.QuantusTabletLearningHub?.renderRoute?.(route) || renderHome();
+    }
     // Eigenstaendige Tablet-Programme zuerst (Homebildschirm, Mail, FlowerTech).
     const mod = moduleFor(route);
     if (mod && typeof mod.render === "function") {
@@ -1206,7 +1214,15 @@
   }
 
   function openExternal(path) {
-    const clean = String(path || "").replace(/^\/+/, "");
+    const raw = String(path || "");
+    // DER GRUNDLEGENDE FEHLER: ein reiner Hash ist eine Route DIESER App, kein
+    // fremdes Ziel. "#/smarter" wurde hier an die Desktop-Adresse gehaengt und
+    // ergab "https://…netlify.app/#/smarter" — das Tablet sprang also in die
+    // Desktop-App, obwohl es fuer smarter eine eigene Ansicht hat. Und weil
+    // openWindow bei blockiertem Popup im SELBEN Fenster oeffnet, war die
+    // Tablet-App danach weg.
+    if (raw.charAt(0) === "#") { go(raw.replace(/^#\/?/, "").split("/")[0]); return; }
+    const clean = raw.replace(/^\/+/, "");
     openWindow(`${appBaseUrl()}/${clean}`);
   }
 

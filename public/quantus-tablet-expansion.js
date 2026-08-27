@@ -45,7 +45,7 @@
     var due = countDue(root.aufg, today);
     var title = titleOf(lesson, "Tageslektion öffnen");
     var sub = lesson && Object.keys(lesson).length ? (due ? due + " Wiederholungen fällig" : "Heutige Lektion ist bereit") : (due ? due + " Wiederholungen fällig" : "Lernplan und Kompendium öffnen");
-    return card("BM Vorbereitung", title, sub, "∑", "sand", "external", "bm.html#/lektion");
+    return card("BM Vorbereitung", title, sub, "∑", "sand", "go", "bm");
   }
 
   function latestSmarter() {
@@ -56,7 +56,7 @@
 
   function smarterCard() {
     var doc = latestSmarter();
-    return card("Smarter", titleOf(doc, "Tagesstoff öffnen"), doc ? (doc.status === "delivered" ? "Heute bereit" : "Neuester Lernstoff") : "Noch kein Tagesdokument", "Σ", "violet", "external", "#/smarter");
+    return card("Smarter", titleOf(doc, "Tagesstoff öffnen"), doc ? (doc.status === "delivered" ? "Heute bereit" : "Neuester Lernstoff") : "Noch kein Tagesdokument", "Σ", "violet", "go", "smarter");
   }
 
   function nextReadingUnit() {
@@ -78,7 +78,7 @@
     var next = nextReadingUnit();
     var title = next ? titleOf(next.doc, "Nächste Leseeinheit") : "Leseplan öffnen";
     var sub = next ? ("Einheit " + (Number(next.unit.index != null ? next.unit.index : next.index) + 1) + " · ca. " + (next.unit.estMinutes || 10) + " Min.") : "Kein offener Abschnitt";
-    return card("Leseplan", title, sub, "▤", "blue", "external", "#/leseplan");
+    return card("Leseplan", title, sub, "▤", "blue", "go", "leseplan");
   }
 
   function nextCareerSession() {
@@ -103,7 +103,7 @@
     var reflected = Boolean(reflections[dateKey()]);
     var title = next ? (titleOf(next.module, "Career Model") + " · " + titleOf(next.day, "Nächster Tag")) : "Fachmodul importieren";
     var sub = next ? ("Tag " + (next.day.day || next.completed + 1) + " · " + (next.day.estimatedMinutes || 30) + " Min. · Reflecta " + (reflected ? "erledigt" : "offen")) : ("30-Minuten-Weiterbildung · Reflecta " + (reflected ? "erledigt" : "offen"));
-    return card("Career Model", title, sub, "C", "green", "external", "career-model.html");
+    return card("Career Model", title, sub, "C", "green", "go", "career");
   }
 
   function boardStats() {
@@ -151,8 +151,8 @@
     var button = global.document.createElement("button");
     button.id = "qtCareerApp";
     button.className = "sb-app";
-    button.setAttribute("data-action", "external");
-    button.setAttribute("data-path", "career-model.html");
+    button.setAttribute("data-action", "go");
+    button.setAttribute("data-route", "career");
     button.title = "Career Model";
     button.innerHTML = '<span class="sb-icon tone-green"><span class="sb-glyph">C</span></span><span class="sb-label">Career Model</span>';
     target.appendChild(button);
@@ -222,6 +222,156 @@
     scheduleRender();
   }
 
-  global.QuantusTabletLearningHub = { state: state, render: renderHomeExpansion, connect: connectData };
+  // ══════════════════════════════════════════════════════════════════════
+  //  TABLETNATIVE ANSICHTEN
+  //
+  //  BEFUND: Alle fuenf Karten des Lerncockpits riefen data-action="external".
+  //  openExternal haengte den Pfad an die DESKTOP-Adresse und oeffnete ein
+  //  neues Fenster; auf dem Tablet ist das Popup meist blockiert, also wurde im
+  //  selben Fenster geoeffnet — die Tablet-App war weg. Fuer "#/smarter" und
+  //  "#/leseplan" entstand dabei sogar eine unsinnige Adresse
+  //  ("…netlify.app/#/smarter"), obwohl das Tablet fuer smarter eine eigene
+  //  Ansicht besitzt.
+  //
+  //  Die Daten waren die ganze Zeit da: connectData abonniert bmpruefung,
+  //  smarter/documents, leseplan/docs und careerModel/users/<uid> live. Es
+  //  fehlten nur Ansichten. Diese hier rendern ausschliesslich daraus — nichts
+  //  wird erfunden, nichts zusaetzlich geladen.
+  // ══════════════════════════════════════════════════════════════════════
+
+  function head(title, subtitle, actions) {
+    var q = api();
+    if (q && q.viewHeader) return q.viewHeader(title, subtitle, actions || "");
+    return '<div class="view-head"><div><h1>' + esc(title) + '</h1><p>' + esc(subtitle || "") + '</p></div><div class="head-actions">' + (actions || "") + '</div></div>';
+  }
+  function leerHinweis(text) {
+    return '<div class="qt-route-empty">' + esc(text) + '</div>';
+  }
+  // Ein optionaler Sprung in die Vollversion bleibt — aber als Zusatz, nicht
+  // als einziger Weg.
+  function vollversion(pfad, label) {
+    return '<button class="btn" data-action="external" data-path="' + esc(pfad) + '">↗ ' + esc(label || "Vollversion") + '</button>';
+  }
+  function fortschritt(anteil) {
+    var p = Math.max(0, Math.min(100, Math.round(anteil * 100)));
+    return '<div class="qt-bar"><div class="qt-bar-fill" style="width:' + p + '%"></div></div>';
+  }
+
+  function renderBm() {
+    var root = asObject(state.bm);
+    var today = dateKey();
+    var lessons = asObject(root.lessons);
+    var heute = asObject(lessons[today]);
+    var faellig = countDue(root.aufg, today);
+    var tage = Object.keys(lessons).sort().reverse();
+
+    return '<div class="view qt-route">' +
+      head("BM Vorbereitung", "Tageslektion, Wiederholungen und Kompendium — direkt auf dem Tablet.",
+        vollversion("bm.html#/lektion", "Vollversion öffnen")) +
+      '<div class="dashboard-grid">' +
+        '<section class="widget span-6 hero-widget"><div class="widget-head"><span class="widget-icon">∑</span><h2>Heute</h2></div>' +
+          (Object.keys(heute).length
+            ? '<div class="qt-route-title">' + esc(titleOf(heute, "Tageslektion")) + '</div>' +
+              '<p class="muted">' + esc(heute.thema || heute.beschreibung || "Die Lektion für heute steht bereit.") + '</p>'
+            : leerHinweis("Für heute ist keine Lektion hinterlegt.")) +
+        '</section>' +
+        '<section class="widget span-6"><div class="widget-head"><span class="widget-icon">↻</span><h2>Wiederholungen</h2></div>' +
+          '<strong class="qt-route-number">' + faellig + '</strong>' +
+          '<small class="muted">' + (faellig === 1 ? "Aufgabe fällig" : "Aufgaben fällig") + '</small>' +
+        '</section>' +
+        '<section class="widget span-12"><div class="widget-head"><span class="widget-icon">▤</span><h2>Lektionen</h2></div>' +
+          (tage.length
+            ? '<div class="item-list">' + tage.slice(0, 14).map(function (tag) {
+                var l = asObject(lessons[tag]);
+                return '<div class="list-item"><span class="badge accent">' + esc(tag) + '</span>' +
+                  '<div class="item-main"><div class="item-title">' + esc(titleOf(l, "Lektion")) + '</div>' +
+                  '<div class="item-meta">' + esc(l.thema || l.beschreibung || "") + '</div></div></div>';
+              }).join("") + '</div>'
+            : leerHinweis("Noch keine Lektionen geladen.")) +
+        '</section>' +
+      '</div></div>';
+  }
+
+  function renderLeseplan() {
+    var docs = values(state.leseplan);
+    var next = nextReadingUnit();
+    var offen = docs.filter(function (d) { return d.status !== "fertig"; });
+
+    return '<div class="view qt-route">' +
+      head("Leseplan", "Dokumente auf ihr Zieldatum verteilt — die nächste Einheit zuoberst.",
+        vollversion("index.html#/leseplan", "Vollversion öffnen")) +
+      '<div class="dashboard-grid">' +
+        '<section class="widget span-12 hero-widget"><div class="widget-head"><span class="widget-icon">▤</span><h2>Als Nächstes</h2></div>' +
+          (next
+            ? '<div class="qt-route-title">' + esc(titleOf(next.doc, "Leseeinheit")) + '</div>' +
+              '<p class="muted">Einheit ' + (Number(next.unit.index != null ? next.unit.index : next.index) + 1) +
+              ' · ca. ' + esc(String(next.unit.estMinutes || 10)) + ' Min. · ' + esc(String(next.unit.datum || "ohne Datum")) + '</p>'
+            : leerHinweis("Kein offener Abschnitt — alles gelesen.")) +
+        '</section>' +
+        '<section class="widget span-12"><div class="widget-head"><span class="widget-icon">◧</span><h2>Dokumente</h2></div>' +
+          (offen.length
+            ? '<div class="item-list">' + offen.map(function (d) {
+                var plan = asArray(d.plan);
+                var fertig = plan.filter(function (u) { return u && u.done; }).length;
+                return '<div class="list-item"><div class="item-main">' +
+                  '<div class="item-title">' + esc(titleOf(d, "Dokument")) + '</div>' +
+                  '<div class="item-meta">' + fertig + ' von ' + plan.length + ' Einheiten' +
+                  (d.zieldatum ? ' · bis ' + esc(String(d.zieldatum)) : "") + '</div>' +
+                  fortschritt(plan.length ? fertig / plan.length : 0) +
+                  '</div></div>';
+              }).join("") + '</div>'
+            : leerHinweis("Keine offenen Dokumente.")) +
+        '</section>' +
+      '</div></div>';
+  }
+
+  function renderCareer() {
+    var root = asObject(state.career);
+    var next = nextCareerSession();
+    var reflected = Boolean(asObject(root.reflections)[dateKey()]);
+    var modules = values(root.modules).filter(function (m) { return m.status !== "archived"; });
+
+    return '<div class="view qt-route">' +
+      head("Career Model", "Dein 30-Minuten-Fachmodul und die tägliche Reflexion.",
+        vollversion("career-model.html", "Vollversion öffnen")) +
+      '<div class="dashboard-grid">' +
+        '<section class="widget span-8 hero-widget"><div class="widget-head"><span class="widget-icon">C</span><h2>Nächste Einheit</h2></div>' +
+          (next
+            ? '<div class="qt-route-title">' + esc(titleOf(next.module, "Modul")) + ' · ' + esc(titleOf(next.day, "Tag")) + '</div>' +
+              '<p class="muted">Tag ' + esc(String(next.day.day || next.completed + 1)) + ' · ' +
+              esc(String(next.day.estimatedMinutes || 30)) + ' Min.</p>' +
+              fortschritt(next.total ? next.completed / next.total : 0) +
+              '<small class="muted">' + next.completed + ' von ' + next.total + ' Tagen</small>'
+            : leerHinweis("Kein Fachmodul aktiv — in der Vollversion eines importieren.")) +
+        '</section>' +
+        '<section class="widget span-4"><div class="widget-head"><span class="widget-icon">◍</span><h2>Reflecta</h2></div>' +
+          '<strong class="qt-route-number">' + (reflected ? "✓" : "–") + '</strong>' +
+          '<small class="muted">' + (reflected ? "heute erledigt" : "heute offen") + '</small>' +
+        '</section>' +
+        '<section class="widget span-12"><div class="widget-head"><span class="widget-icon">▦</span><h2>Module</h2></div>' +
+          (modules.length
+            ? '<div class="item-list">' + modules.map(function (m) {
+                var order = asArray(m.dayOrder);
+                var done = Object.keys(asObject(asObject(root.progress)[m.id]).completedDays || {}).length;
+                return '<div class="list-item"><span class="badge' + (m.status === "active" ? " accent" : "") + '">' +
+                  esc(m.status || "offen") + '</span><div class="item-main">' +
+                  '<div class="item-title">' + esc(titleOf(m, "Modul")) + '</div>' +
+                  '<div class="item-meta">' + done + ' von ' + order.length + ' Tagen</div>' +
+                  fortschritt(order.length ? done / order.length : 0) +
+                  '</div></div>';
+              }).join("") + '</div>'
+            : leerHinweis("Noch kein Modul importiert.")) +
+        '</section>' +
+      '</div></div>';
+  }
+
+  function renderRoute(route) {
+    if (route === "bm") return renderBm();
+    if (route === "leseplan") return renderLeseplan();
+    if (route === "career") return renderCareer();
+    return "";
+  }
+
+  global.QuantusTabletLearningHub = { state: state, render: renderHomeExpansion, connect: connectData, renderRoute: renderRoute };
   if (global.document.readyState === "loading") global.document.addEventListener("DOMContentLoaded", start, { once: true }); else start();
 })(typeof window !== "undefined" ? window : null);
