@@ -1925,7 +1925,11 @@
     // Bausteine fuer die Tablet-Module (Homebildschirm, Mail, FlowerTech)
     render, scheduleRender, sheet, closeOverlay, appBaseUrl, viewHeader, emptyState, emptyMini,
     esc, attr, formatDate, formatTime, relativeTime, money, itemTitle, itemText, isDone,
-    localDateKey, todayTasks, dueCards, activeHabits, APP_DEFS, COLLECTION_CONFIG
+    localDateKey, todayTasks, dueCards, activeHabits, APP_DEFS, COLLECTION_CONFIG,
+    // Der Homebildschirm ist ein eigenes Modul (springboard.js) und ueberschreibt
+    // renderHome(). Ohne diese Bausteine kann er das Morgenbriefing nicht zeigen —
+    // genau deshalb fehlte es dort, obwohl app.js einen Hero dafuer hat.
+    briefingModell, isHabitDoneOn, habitSubUnits, habitSubDone, todayEvents, todayMeetings
   };
   boot();
 })();

@@ -159,12 +159,10 @@
       return due && due < a.localDateKey();
     }).length;
     var habits = a.activeHabits();
-    var doneHabits = habits.filter(function (habit) {
-      var log = habit && habit.completions;
-      return Array.isArray(log) && log.some(function (entry) {
-        return entry && String(entry.date || entry) === a.localDateKey();
-      });
-    }).length;
+    // Dieselbe Regel wie ueberall sonst: eine Routine MIT Schritten gilt erst
+    // als erledigt, wenn alle stehen. Vorher zaehlte dieser Kasten nur
+    // completions und wich damit von Briefing, Handy und Hauptapp ab.
+    var doneHabits = habits.filter(function (habit) { return a.isHabitDoneOn(habit, a.localDateKey()); }).length;
     var meetings = a.collection("meetings").concat(a.collection("calendarEvents"))
       .filter(function (item) { return String(item.date || item.start || "").slice(0, 10) >= a.localDateKey(); })
       .sort(function (x, y) {
@@ -195,6 +193,67 @@
       "</div>";
   }
 
+  /*
+   * DAS MORGENBRIEFING AUF DEM HOMEBILDSCHIRM.
+   *
+   * BEFUND (Bildschirmfoto): auf Home war vom Tag nichts zu sehen. app.js hat
+   * dafuer einen Hero (briefingHero), aber renderHome() laeuft gar nicht:
+   * dieses Modul ist fuer die Route "home" registriert und ueberschreibt sie.
+   * Der Hero war fuer den Homebildschirm toter Code.
+   *
+   * Der Block liest DASSELBE Modell wie die Briefing-Ansicht
+   * (briefingModell) — zwei Rechnungen fuer denselben Tag waeren zwei
+   * Wahrheiten.
+   */
+  function briefingBlock() {
+    var a = api();
+    if (!a || typeof a.briefingModell !== "function") return "";
+    var tag = a.localDateKey();
+    var b;
+    try { b = a.briefingModell(tag); } catch (e) { return ""; }
+
+    var routinenFertig = (b.routinen || []).filter(function (h) { return a.isHabitDoneOn(h, tag); }).length;
+    var zieleFertig = (b.tagesziele || []).filter(function (g) { return g && g.completed; }).length;
+    var naechster = (b.meetings || []).slice().sort(function (x, y) {
+      return String(x.startTime || x.time || x.start || "").localeCompare(String(y.startTime || y.time || y.start || ""));
+    })[0];
+
+    var zeilen = [];
+    if (naechster) {
+      zeilen.push('<li><b>' + esc(a.formatTime(naechster.startTime || naechster.time || naechster.start) || "—") +
+        "</b> " + esc(a.itemTitle(naechster, "Termin")) + "</li>");
+    }
+    (b.tagesziele || []).filter(function (g) { return g && !g.completed; }).slice(0, 2).forEach(function (g) {
+      zeilen.push("<li>◎ " + esc(g.title || "") + "</li>");
+    });
+    if ((b.ueberfaellig || []).length) {
+      zeilen.push('<li class="warn">' + (b.ueberfaellig.length) + " überfällig</li>");
+    }
+    (b.beliefs || []).slice(0, 1).forEach(function (x) {
+      zeilen.push("<li>✦ " + esc(x && x.text ? x.text : String(x || "")) + "</li>");
+    });
+    if (!zeilen.length) zeilen.push("<li>Nichts Dringendes — freier Lauf.</li>");
+
+    // Ohne Daten sagt der Block, WARUM er leer ist. Ein stummer leerer Kasten
+    // waere hier das Schlimmste: man haelt ihn fuer kaputt statt fuer leer.
+    var leerGrund = (!a.state.user)
+      ? "Nicht angemeldet — melde dich an, um deinen Tag zu laden."
+      : (!a.state.remoteReady ? "Noch keine Daten geladen." : "");
+
+    return '<button class="sb-briefing" data-action="go" data-route="daily">' +
+      '<span class="sb-bf-head">☀ Morgenbriefing</span>' +
+      '<span class="sb-bf-nums">' +
+        "<span><b>" + (b.meetings || []).length + "</b> Termine</span>" +
+        "<span><b>" + (b.faellig || []).length + "</b> fällig</span>" +
+        "<span><b>" + routinenFertig + "/" + (b.routinen || []).length + "</b> Routinen</span>" +
+        "<span><b>" + zieleFertig + "/" + (b.tagesziele || []).length + "</b> Tagesziele</span>" +
+      "</span>" +
+      (leerGrund ? '<span class="sb-bf-hint">' + esc(leerGrund) + "</span>"
+                 : '<ul class="sb-bf-lines">' + zeilen.join("") + "</ul>") +
+      '<span class="sb-bf-more">Vollständiges Daily Briefing öffnen ›</span>' +
+      "</button>";
+  }
+
   function render() {
     var a = api();
     var dock = loadDock().map(function (key) { return allApps()[key]; }).filter(Boolean);
@@ -205,10 +264,16 @@
       '<div class="sb-top"><div><div class="sb-greet">' + greeting + ', Laurin.</div>' +
       '<div class="sb-sub">' + esc(a && a.state.user ? "Gleicher Datenstand wie AI Sync und Handy." : "Melde dich an, um deinen Quantus-Tag zu laden.") +
       "</div></div><div class=\"sb-actions\">" +
+      '<button class="sb-round' + (dockModus ? " on" : "") + '" data-action="sb-dock-modus" ' +
+        'aria-pressed="' + (dockModus ? "true" : "false") + '" ' +
+        'title="Dock bearbeiten" aria-label="Dock bearbeiten">▤</button>' +
       '<button class="sb-round" data-action="search" aria-label="Suchen">⌕</button>' +
       '<button class="sb-round" data-action="polaris" aria-label="Polaris">✦</button>' +
       '<button class="sb-round" data-action="new-entity" data-collection="tasks" aria-label="Neue Aufgabe">＋</button>' +
       "</div></div>" +
+      (dockModus ? '<div class="sb-dockhint">Dock bearbeiten: Tippe ein Symbol an, um es ins Dock zu legen ' +
+        'oder herauszunehmen. Nochmals auf ▤ tippen beendet den Modus.</div>' : "") +
+      briefingBlock() +
       widgets() +
       '<div class="sb-pages" id="sbPages">' + PAGES.map(function (page) {
         return '<section class="sb-page"><div class="sb-page-title">' + esc(page.title) + "</div>" +
@@ -223,12 +288,22 @@
       "</div></div>";
   }
 
-  var pressTimer = null;
-  var lastLongPress = 0;
-  // Ein Tippen auf dem Tablet dauert schnell einmal eine halbe Sekunde. Erst ab
-  // dieser Dauer und nur ohne Fingerbewegung gilt es als langer Druck.
-  var LONG_PRESS_MS = 750;
-  var MOVE_TOLERANCE = 12;
+  /*
+   * BEFUND (gemessen, Chromium): ein Tipp von 760 ms oder laenger oeffnete die
+   * App NICHT mehr. Er galt als langer Druck, legte das Symbol ins Dock,
+   * loeste ein Neuzeichnen aus — das war das Flimmern — und onAction sperrte
+   * den folgenden Klick weitere 700 ms. Gemessene Schwelle:
+   *     80 ms ✓   300 ms ✓   600 ms ✓   760 ms ✗   900 ms ✗   1100 ms ✗
+   * Ein bewusster Fingertipp auf einem Tablet dauert leicht so lang. Damit
+   * verschluckte eine VERSTECKTE Geste die Hauptfunktion des Bildschirms.
+   *
+   * Die Schwelle hochzusetzen haette das Problem nur verschoben. Stattdessen
+   * gilt jetzt: EIN TIPP OEFFNET IMMER. Das Dock wird in einem eigenen,
+   * sichtbaren Modus umgeraeumt ("Dock bearbeiten"), in dem ein Tipp
+   * ausdruecklich etwas anderes tut. Was nicht heimlich passiert, kann auch
+   * nichts verschlucken.
+   */
+  var dockModus = false;
 
   function toggleDock(key) {
     var list = loadDock();
@@ -236,7 +311,6 @@
     if (index >= 0) list.splice(index, 1);
     else { if (list.length >= 5) list.pop(); list.unshift(key); }
     saveDock(list);
-    lastLongPress = Date.now();
     var a = api();
     if (a) {
       a.toast(index >= 0 ? "Aus dem Dock entfernt" : "Ins Dock gelegt", key, "ok");
@@ -263,38 +337,24 @@
         });
       });
     }
-    root.querySelectorAll(".sb-app").forEach(function (button) {
-      var origin = null;
-      var cancel = function () { clearTimeout(pressTimer); pressTimer = null; origin = null; };
-      var start = function (event) {
-        cancel();
-        origin = { x: event.clientX, y: event.clientY };
-        pressTimer = setTimeout(function () {
-          pressTimer = null;
-          button.classList.add("jiggle");
-          setTimeout(function () { button.classList.remove("jiggle"); }, 500);
-          toggleDock(button.dataset.sbKey);
-        }, LONG_PRESS_MS);
-      };
-      var move = function (event) {
-        // Wischen zum Blaettern oder Scrollen darf kein Dock-Umlegen ausloesen.
-        if (!origin) return;
-        if (Math.abs(event.clientX - origin.x) > MOVE_TOLERANCE || Math.abs(event.clientY - origin.y) > MOVE_TOLERANCE) cancel();
-      };
-      button.addEventListener("pointerdown", start);
-      button.addEventListener("pointermove", move);
-      button.addEventListener("pointerup", cancel);
-      button.addEventListener("pointerleave", cancel);
-      button.addEventListener("pointercancel", cancel);
-      button.addEventListener("contextmenu", function (event) { event.preventDefault(); });
-    });
   }
 
-  // Nach einem langen Druck darf der folgende Klick nicht navigieren.
+  /*
+   * Im Dock-Modus tut ein Tipp auf ein Symbol ausdruecklich etwas anderes:
+   * er legt es ins Dock oder holt es heraus. Ausserhalb dieses Modus wird
+   * NIE etwas abgefangen — ein Tipp oeffnet immer die App.
+   */
   function onAction(action, button) {
-    if (action !== "go") return false;
-    if (!button.dataset.sbKey) return false;
-    return Date.now() - lastLongPress < 700;
+    if (action === "sb-dock-modus") {
+      dockModus = !dockModus;
+      var a0 = api();
+      if (a0) a0.render();
+      return true;
+    }
+    if (!dockModus) return false;
+    if (action !== "go" || !button.dataset.sbKey) return false;
+    toggleDock(button.dataset.sbKey);
+    return true;
   }
 
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({

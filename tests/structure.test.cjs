@@ -97,9 +97,38 @@ assert.doesNotMatch(appsCss, /\.sb-dock \{[^}]*position: fixed/, "the springboar
 assert.doesNotMatch(appsCss, /\.sb-dots \{[^}]*position: fixed/, "the page dots must not cover the app icons");
 assert.match(appsCss, /\.sb-footer/, "springboard dots and dock belong in a footer in the flow");
 assert.match(springboard, /sb-footer/, "springboard must render its footer");
-// Ein normales Tippen darf nicht als langer Druck gelten.
-assert.match(springboard, /LONG_PRESS_MS = 7\d\d/, "long press needs a tablet friendly threshold");
-assert.match(springboard, /MOVE_TOLERANCE/, "a moving finger must cancel the long press");
+/*
+ * Frueher stand hier eine Schwelle fuer den langen Druck (LONG_PRESS_MS).
+ * GEMESSEN (Chromium, echte Zeigerereignisse): ein Tipp ab 760 ms oeffnete die
+ * App NICHT mehr — er galt als langer Druck, legte das Symbol ins Dock, loeste
+ * ein Neuzeichnen aus und sperrte den folgenden Klick weitere 700 ms.
+ *     80 ms ✓   300 ms ✓   600 ms ✓   760 ms ✗   900 ms ✗   1100 ms ✗
+ * Ein bewusster Fingertipp auf einem Tablet dauert leicht so lang; eine
+ * versteckte Geste verschluckte damit die Hauptfunktion des Bildschirms.
+ *
+ * Die Schwelle hochzusetzen haette das nur verschoben. Die Regel lautet jetzt:
+ * EIN TIPP OEFFNET IMMER. Umgeraeumt wird das Dock in einem sichtbaren Modus.
+ */
+assert.doesNotMatch(springboard, /LONG_PRESS_MS/,
+  "der lange Druck ist zurueck — er verschluckt wieder den normalen Tipp");
+assert.doesNotMatch(springboard, /lastLongPress/,
+  "onAction sperrt wieder Klicks nach einem langen Druck");
+assert.doesNotMatch(springboard, /pointerdown/,
+  "auf den App-Symbolen haengt wieder ein Zeiger-Handler, der den Tipp abfangen kann");
+assert.match(springboard, /if \(!dockModus\) return false;/,
+  "ausserhalb des Dock-Modus darf onAction gar nichts abfangen");
+assert.match(springboard, /data-action="sb-dock-modus"/,
+  "es fehlt der sichtbare Schalter fuer den Dock-Modus");
+// Und das Morgenbriefing steht auf dem Homebildschirm. app.js hat dafuer einen
+// Hero, aber springboard.js ueberschreibt renderHome() — er lief dort nie.
+assert.match(springboard, /function briefingBlock/,
+  "auf dem Homebildschirm fehlt das Morgenbriefing");
+assert.match(springboard, /briefingModell/,
+  "der Homebildschirm rechnet den Tag selbst statt das gemeinsame Modell zu lesen");
+assert.match(springboard, /briefingBlock\(\) \+/,
+  "der Briefingblock wird nicht gerendert");
+assert.match(app, /briefingModell, isHabitDoneOn/,
+  "die Bruecke reicht das Briefingmodell nicht an die Module durch");
 // Externe Seiten muessen sich auch ohne zweites Fenster oeffnen lassen.
 assert.match(app, /function openWindow\b/, "external links need a popup blocker fallback");
 assert.match(app, /location\.assign\(url\)/, "blocked popups must open in the same window");
