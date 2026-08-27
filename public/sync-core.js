@@ -61,6 +61,13 @@
     if (!isObject(payload.dailyBriefing)) payload.dailyBriefing = {};
     if (!Array.isArray(payload.dailyBriefing.routines)) payload.dailyBriefing.routines = [];
     if (!Array.isArray(payload.dailyBriefing.beliefs)) payload.dailyBriefing.beliefs = [];
+    // Das Daily Briefing schreibt in drei weitere Aeste: die Tagesnotiz, die
+    // Tagesziele und die Gedanken. Sie liegen dort, wo die Hauptapp sie auch
+    // sucht — dailyBriefing.dailyLog, dailyGoals und journal.topics.
+    if (!isObject(payload.dailyBriefing.dailyLog)) payload.dailyBriefing.dailyLog = {};
+    if (!isObject(payload.dailyGoals)) payload.dailyGoals = {};
+    if (!isObject(payload.journal)) payload.journal = {};
+    if (!Array.isArray(payload.journal.topics)) payload.journal.topics = [];
     if (!isObject(payload.recallLabData)) payload.recallLabData = {};
     if (!Array.isArray(payload.recallLabData.cards)) payload.recallLabData.cards = [];
     if (!Array.isArray(payload.recallLabData.decks)) payload.recallLabData.decks = [];
@@ -152,6 +159,57 @@
     return { applied: true, reason: "habit-updated" };
   }
 
+  /*
+   * BRIEFING-OPERATIONEN.
+   *
+   * Das Tablet zeigte das Daily Briefing bisher nur an. Mit der Vollfassung
+   * kommen drei schreibende Teile dazu: Tagesziel, Gedanke, Tagesnotiz. Fuer
+   * sie gab es keine Operationsart — ein Formular haette stumm nichts getan.
+   *
+   * Geschrieben wird EXAKT dorthin, wo die Hauptapp liest. Ein eigener
+   * Ablageort waere ein zweiter Datenstand, den niemand mehr zusammenfuehrt.
+   */
+  function applyBriefingOperation(payload, operation) {
+    const patch = isObject(operation.patch) ? operation.patch : {};
+    const tag = String(patch.date || "").slice(0, 10);
+    const was = operation.action;
+
+    if (was === "note") {
+      if (!tag) return { applied: false, reason: "briefing-note-without-date" };
+      const log = payload.dailyBriefing.dailyLog;
+      if (!isObject(log[tag])) log[tag] = { routineChecks: {}, notes: "" };
+      log[tag].notes = String(patch.notes || "");
+      return { applied: true, reason: "briefing-note-updated" };
+    }
+
+    if (was === "goal-add" || was === "goal-toggle" || was === "goal-delete") {
+      if (!tag) return { applied: false, reason: "briefing-goal-without-date" };
+      if (!Array.isArray(payload.dailyGoals[tag])) payload.dailyGoals[tag] = [];
+      const liste = payload.dailyGoals[tag];
+      if (was === "goal-add") {
+        liste.push({ id: operation.id, title: String(patch.title || ""), completed: false, createdAt: operation.updatedAt });
+        return { applied: true, reason: "briefing-goal-added" };
+      }
+      const i = liste.findIndex((g) => g && g.id === operation.id);
+      if (i < 0) return { applied: false, reason: "briefing-goal-missing" };
+      if (was === "goal-toggle") { liste[i].completed = !liste[i].completed; return { applied: true, reason: "briefing-goal-toggled" }; }
+      liste.splice(i, 1);
+      return { applied: true, reason: "briefing-goal-deleted" };
+    }
+
+    if (was === "thought-add") {
+      payload.journal.topics.push({ id: operation.id, text: String(patch.text || ""), createdAt: operation.updatedAt });
+      return { applied: true, reason: "briefing-thought-added" };
+    }
+    if (was === "thought-delete") {
+      const i = payload.journal.topics.findIndex((t) => t && t.id === operation.id);
+      if (i < 0) return { applied: false, reason: "briefing-thought-missing" };
+      payload.journal.topics.splice(i, 1);
+      return { applied: true, reason: "briefing-thought-deleted" };
+    }
+    return { applied: false, reason: "unsupported-briefing-action" };
+  }
+
   function applyFlashcardOperation(payload, operation) {
     if (!operation.id) return { applied: false, reason: "invalid-flashcard-operation" };
     const cards = payload.recallLabData.cards;
@@ -207,6 +265,7 @@
     if (!operation || !operation.kind) result = { applied: false, reason: "invalid-operation" };
     else if (operation.kind === "entity") result = applyEntityOperation(payload, operation);
     else if (operation.kind === "habit") result = applyHabitOperation(payload, operation);
+    else if (operation.kind === "briefing") result = applyBriefingOperation(payload, operation);
     else if (operation.kind === "flashcard") result = applyFlashcardOperation(payload, operation);
     else if (operation.kind === "flowertech") result = applyFlowerTechOperation(payload, operation);
     else result = { applied: false, reason: "unsupported-operation" };

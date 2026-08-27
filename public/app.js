@@ -164,6 +164,7 @@
     driveDocs: {},
     smarterDocs: {},
     selectedDocId: null,
+    dbTag: null,          // gewaehlter Tag im Daily Briefing (null = heute)
     pending: [],
     settings: loadJson(LOCAL_KEYS.settings, { aiSyncUrl: DEFAULT_AI_SYNC_URL, theme: "dark" }),
     deviceId: getDeviceId(),
@@ -765,27 +766,221 @@
 
   // Erledigt-Stempel wie in der Routinen-Ansicht — hier gebraucht, damit der
   // Hero denselben Stand zeigt wie das Briefing.
-  function isHabitDoneToday(habit) {
-    const today = new Date().toISOString().slice(0, 10);
+  /*
+   * BEFUND: hier stand new Date().toISOString().slice(0,10) — also der Tag in
+   * UTC. Ab 22 Uhr Zuercher Sommerzeit ist das bereits der Folgetag: eine
+   * abends abgehakte Routine galt als offen, und der Zaehler im Hero log.
+   * localDateKey() gibt es in dieser Datei laengst und rechnet in
+   * Europe/Zurich.
+   *
+   * ZWEITER PUNKT: eine Routine MIT Sub-Einheiten gilt in der Hauptapp erst
+   * als erledigt, wenn ALLE Schritte stehen (isHabitDoneOnDate). Ohne diese
+   * Regel zaehlten Tablet, Handy und Hauptapp am selben Datensatz
+   * verschieden.
+   */
+  function habitSubUnits(habit) {
+    return asArray(habit && habit.subUnits).filter((u) => u && u.name);
+  }
+  function habitSubDone(habit, name, dayKey) {
+    return asArray(habit && habit.subCompletions)
+      .some((c) => c && c.date === dayKey && c.subUnitName === name);
+  }
+  function isHabitDoneOn(habit, dayKey) {
+    const subs = habitSubUnits(habit);
+    if (subs.length) return subs.every((u) => habitSubDone(habit, u.name, dayKey));
     const done = habit && (habit.completions || habit.erledigt || habit.done);
-    if (Array.isArray(done)) return done.some((entry) => String(entry && (entry.date || entry)).slice(0, 10) === today);
-    if (done && typeof done === "object") return Boolean(done[today]);
+    if (Array.isArray(done)) return done.some((entry) => String(entry && (entry.date || entry)).slice(0, 10) === dayKey);
+    if (done && typeof done === "object") return Boolean(done[dayKey]);
     return false;
+  }
+  function isHabitDoneToday(habit) { return isHabitDoneOn(habit, localDateKey()); }
+
+  /*
+   * DAS VOLLSTAENDIGE DAILY BRIEFING.
+   *
+   * BEFUND: hier standen vier Kacheln — Prioritaeten, Agenda, Routinen,
+   * Leitgedanken. Die Hauptapp zeigt SIEBZEHN Abschnitte, und alle liegen im
+   * selben Datensatz: Tagesziele, Wochenziele, Massnahmen, Nachrichten,
+   * Gedanken, Leseliste, Tagesplanung, pendente Aufgaben, generelle Ziele,
+   * Notizen, Projekte, Programme, Meetings, Reflexionsfragen und die
+   * vergangenen Tage. Sie wurden nur nie gelesen.
+   *
+   * Dieses Modell liest DIESELBEN Felder wie die Handy-App
+   * (store.briefingFuerTag). Laufen die beiden auseinander, faellt der
+   * Waechter in beiden Repos.
+   */
+  function briefingModell(dayKey) {
+    const payload = state.payload || {};
+    const db = asMap(payload.dailyBriefing);
+    const tagVon = (v) => String(v || "").slice(0, 10);
+    const offen = collection("tasks").filter((t) => !isDone(t));
+
+    const wocheStart = (() => {
+      const x = new Date(dayKey + "T12:00:00");
+      x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+      return localDateKey(x);
+    })();
+
+    // Massnahmen liegen VERTEILT an den Entitaeten — wortgleich zu
+    // getAllActiveMeasures() der Hauptapp.
+    const massnahmen = [];
+    [["Aufgabe", "tasks"], ["Projekt", "projects"], ["Konzept", "concepts"], ["Strategie", "strategies"]]
+      .forEach(([label, name]) => {
+        collection(name).forEach((e) => asArray(e.measures).forEach((m) => {
+          if (!m) return;
+          massnahmen.push({ id: m.id, text: m.text, status: m.status || "active",
+            parentLabel: label, parentTitle: itemTitle(e, label) });
+        }));
+      });
+
+    const reflexionsfragen = [];
+    collection("projects").forEach((p) => asArray(p.reflectionQuestions).forEach((q) => {
+      if (!q) return;
+      const letzte = asArray(q.answers).slice(-1)[0];
+      reflexionsfragen.push({ id: q.id, text: q.text || q.question || "", projekt: itemTitle(p, "Projekt"),
+        heuteBeantwortet: Boolean(letzte && letzte.date === dayKey) });
+    }));
+
+    const log = asMap(asMap(db.dailyLog)[dayKey]);
+    const vergangene = Array.from(new Set([].concat(
+      Object.keys(asMap(db.dailyLog)), Object.keys(asMap(db.timeBlocks)), Object.keys(asMap(payload.dailyGoals))
+    ))).filter((k) => k < dayKey).sort().reverse().slice(0, 14);
+
+    return {
+      datum: dayKey,
+      tagesziele:  asArray(asMap(payload.dailyGoals)[dayKey]),
+      wochenziele: asArray(payload.weeklyGoals).filter((g) => !g.weekStart || g.weekStart === wocheStart),
+      routinen:    activeHabits(),
+      beliefs:     asArray(db.beliefs),
+      massnahmen:  massnahmen.filter((m) => m.status === "active"),
+      nachrichten: values(payload.entities && payload.entities.scheduledMessages)
+                     .filter((m) => m && m.isDelivered && tagVon(m.deliveredAt) === dayKey),
+      gedanken:    asArray(payload.journal && payload.journal.topics).slice().reverse(),
+      leseliste:   asArray(payload.readingList),
+      zeitbloecke: asArray(asMap(db.timeBlocks)[dayKey]).slice()
+                     .sort((a, b) => String(a.startTime || "").localeCompare(String(b.startTime || ""))),
+      meetings:    [].concat(todayEvents(), todayMeetings()),
+      faellig:     offen.filter((t) => tagVon(t.dueDate) === dayKey),
+      ueberfaellig: offen.filter((t) => t.dueDate && tagVon(t.dueDate) < dayKey),
+      pendent:     offen.filter((t) => !t.dueDate),
+      ziele:       collection("goals").filter((g) => !asArray(db.hiddenGoals).includes(g.id)),
+      notizen:     String(log.notes || ""),
+      projekte:    collection("projects").filter((p) => asArray(db.selectedProjects).includes(p.id)),
+      programme:   collection("programs").filter((p) => asArray(db.selectedPrograms).includes(p.id)),
+      reflexionsfragen: reflexionsfragen,
+      vergangeneTage: vergangene
+    };
+  }
+
+  function dbSection(spalten, icon, titel, zaehler, inhalt, kopfAktion) {
+    return `<section class="widget span-${spalten}">
+      <div class="widget-head"><span class="widget-icon">${icon}</span><h2>${esc(titel)}</h2>
+        ${zaehler ? `<span class="badge accent">${esc(String(zaehler))}</span>` : ""}
+        ${kopfAktion || ""}</div>
+      ${inhalt}
+    </section>`;
+  }
+  function dbZeile(titel, unten, klasse) {
+    return `<div class="list-item ${klasse || ""}"><div class="item-main">
+      <div class="item-title">${esc(String(titel))}</div>
+      ${unten ? `<div class="item-meta">${esc(String(unten))}</div>` : ""}</div></div>`;
   }
 
   function renderDaily() {
-    const tasks = todayTasks();
-    const meetings = [...todayEvents(), ...todayMeetings()];
-    const habits = activeHabits();
-    const beliefs = asArray(state.payload.dailyBriefing && state.payload.dailyBriefing.beliefs);
+    const tag = state.dbTag || localDateKey();
+    const heute = localDateKey();
+    const b = briefingModell(tag);
+    const routinenFertig = b.routinen.filter((h) => isHabitDoneOn(h, tag)).length;
+    const zieleFertig = b.tagesziele.filter((g) => g && g.completed).length;
+    const datumText = new Date(tag + "T12:00:00").toLocaleDateString("de-CH", { weekday: "long", day: "numeric", month: "long" });
+
+    const routineZeile = (h) => {
+      const on = isHabitDoneOn(h, tag);
+      const subs = habitSubUnits(h);
+      const fertig = subs.filter((u) => habitSubDone(h, u.name, tag)).length;
+      return `<div class="list-item ${on ? "done" : ""}" data-action="toggle-habit" data-id="${attr(h.id)}">
+        <span class="check">${on ? "✓" : ""}</span>
+        <div class="item-main"><div class="item-title">${esc(h.text || itemTitle(h, "Routine"))}</div>
+        <div class="item-meta">${subs.length ? `${fertig}/${subs.length} Schritte` : esc(h.frequency || "täglich")}</div></div>
+      </div>`;
+    };
+
     return `<div class="view">
-      ${viewHeader("Daily Briefing", "Deine Termine, Prioritäten, Routinen und Lernaufgaben für heute.", `<button class="btn" data-action="polaris">Mit Polaris besprechen</button><button class="btn primary" data-action="new-entity" data-collection="tasks">＋ Aufgabe</button>`)}
+      ${viewHeader("Daily Briefing", datumText, `<button class="btn" data-action="db-day" data-tage="-1">‹ Vortag</button>${tag === heute ? "" : `<button class="btn" data-action="db-day" data-tag="heute">Heute</button>`}<button class="btn" data-action="db-day" data-tage="1">Folgetag ›</button><button class="btn" data-action="polaris">Mit Polaris besprechen</button><button class="btn primary" data-action="new-entity" data-collection="tasks">＋ Aufgabe</button>`)}
       ${loginBanner()}
+      <div class="metric-row">
+        <div class="metric"><strong>${b.meetings.length}</strong><small>Termine</small></div>
+        <div class="metric"><strong>${b.faellig.length}</strong><small>fällig</small></div>
+        <div class="metric"><strong>${b.ueberfaellig.length}</strong><small>überfällig</small></div>
+        <div class="metric"><strong>${routinenFertig}/${b.routinen.length}</strong><small>Routinen</small></div>
+        <div class="metric"><strong>${zieleFertig}/${b.tagesziele.length}</strong><small>Tagesziele</small></div>
+      </div>
       <div class="dashboard-grid">
-        <section class="widget span-7 tall"><div class="widget-head"><span class="widget-icon">✓</span><h2>Prioritäten</h2></div><div class="item-list">${tasks.map(taskItem).join("") || emptyMini("Alles erledigt – es gibt keine überfälligen Aufgaben.")}</div></section>
-        <section class="widget span-5 tall"><div class="widget-head"><span class="widget-icon">◉</span><h2>Agenda</h2></div><div class="item-list">${meetings.map((item) => `<div class="list-item"><span class="badge accent">${esc(formatTime(item.start || item.startAt || item.time) || "Heute")}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item,"Termin"))}</div><div class="item-meta">${esc(item.location || item.description || "")}</div></div></div>`).join("") || emptyMini("Keine Termine für heute")}</div></section>
-        <section class="widget span-6"><div class="widget-head"><span class="widget-icon">◌</span><h2>Routinen</h2><button data-action="go" data-route="habits">Bearbeiten</button></div><div class="item-list">${habits.map(habitItem).join("") || emptyMini("Füge deine erste Routine hinzu")}</div></section>
-        <section class="widget span-6"><div class="widget-head"><span class="widget-icon">✦</span><h2>Leitgedanken</h2></div>${beliefs.length ? beliefs.slice(0,5).map((item) => `<blockquote style="margin:8px 0;color:var(--text2)">“${esc(item.text || item.title || item)}”</blockquote>`).join("") : emptyMini("Noch keine Leitgedanken im Daily Briefing")}</section>
+
+        ${dbSection(6, "◎", "Tagesziele", `${zieleFertig}/${b.tagesziele.length}`,
+          `<div class="item-list">${b.tagesziele.map((g) => `<div class="list-item ${g.completed ? "done" : ""}" data-action="db-toggle-goal" data-id="${attr(g.id)}"><span class="check">${g.completed ? "✓" : ""}</span><div class="item-main"><div class="item-title">${esc(g.title || "")}</div></div></div>`).join("") || emptyMini("Noch kein Tagesziel.")}</div>
+           <form class="quick-add" data-form="db-goal"><span>＋</span><input name="title" placeholder="Ziel für diesen Tag" autocomplete="off"><button class="btn primary small-btn" type="submit">Hinzufügen</button></form>`)}
+
+        ${dbSection(6, "▲", "Wochenziele", b.wochenziele.length,
+          `<div class="item-list">${b.wochenziele.map((g) => dbZeile(g.title || g.type || "Ziel", (g.current != null && g.target != null) ? `${g.current}/${g.target}` : "")).join("") || emptyMini("Keine Wochenziele.")}</div>`)}
+
+        ${dbSection(7, "◷", "Tagesplanung", b.zeitbloecke.length,
+          `<div class="item-list">${b.zeitbloecke.map((tb) => `<div class="list-item"><span class="badge accent">${esc(String(tb.startTime || "").slice(0,5))}</span><div class="item-main"><div class="item-title">${esc(tb.title || "Block")}</div><div class="item-meta">bis ${esc(String(tb.endTime || "").slice(0,5))}</div></div></div>`).join("") || emptyMini("Keine Zeitblöcke für diesen Tag.")}</div>`)}
+
+        ${dbSection(5, "◉", "Agenda", b.meetings.length,
+          `<div class="item-list">${b.meetings.map((m) => `<div class="list-item"><span class="badge accent">${esc(formatTime(m.start || m.startAt || m.time) || "Heute")}</span><div class="item-main"><div class="item-title">${esc(itemTitle(m,"Termin"))}</div><div class="item-meta">${esc(m.location || m.description || "")}</div></div></div>`).join("") || emptyMini("Keine Termine für diesen Tag.")}</div>`,
+          `<button data-action="go" data-route="meetings">Öffnen</button>`)}
+
+        ${dbSection(6, "✓", "Fällig heute", b.faellig.length,
+          `<div class="item-list">${b.faellig.map(taskItem).join("") || emptyMini("Nichts fällig.")}</div>`)}
+
+        ${b.ueberfaellig.length ? dbSection(6, "!", "Überfällig", b.ueberfaellig.length,
+          `<div class="item-list">${b.ueberfaellig.map(taskItem).join("")}</div>`) : ""}
+
+        ${dbSection(6, "▣", "Pendente Aufgaben", b.pendent.length,
+          `<div class="item-list">${b.pendent.slice(0, 10).map(taskItem).join("") || emptyMini("Nichts Offenes ohne Datum.")}</div>`,
+          `<button data-action="go" data-route="tasks">Alle</button>`)}
+
+        ${dbSection(6, "◌", "Routinen", `${routinenFertig}/${b.routinen.length}`,
+          `<div class="item-list">${b.routinen.map(routineZeile).join("") || emptyMini("Füge deine erste Routine hinzu.")}</div>`,
+          `<button data-action="go" data-route="habits">Bearbeiten</button>`)}
+
+        ${dbSection(6, "⚑", "Aktive Massnahmen", b.massnahmen.length,
+          `<div class="item-list">${b.massnahmen.map((m) => dbZeile(m.text || "", `${m.parentLabel} · ${m.parentTitle}`)).join("") || emptyMini("Keine aktiven Massnahmen.")}</div>`)}
+
+        ${dbSection(6, "✉", "Nachrichten", b.nachrichten.length,
+          `<div class="item-list">${b.nachrichten.map((m) => `<div class="list-item"><div class="item-main"><div class="item-title">${esc(m.title || "Nachricht")}</div><div class="item-meta">${esc(String(m.content || "").slice(0, 200))}</div></div><span class="badge">${esc(String(m.deliveredAt || "").slice(11,16))}</span></div>`).join("") || emptyMini("Keine Nachrichten für diesen Tag.")}</div>`)}
+
+        ${dbSection(6, "✦", "Leitgedanken", b.beliefs.length,
+          b.beliefs.length ? b.beliefs.slice(0, 8).map((i) => `<blockquote style="margin:8px 0;color:var(--text2)">“${esc(i.text || i.title || i)}”</blockquote>`).join("") : emptyMini("Noch keine Leitgedanken."))}
+
+        ${dbSection(6, "◈", "Gedanken & Fragen", b.gedanken.length,
+          `<div class="item-list">${b.gedanken.slice(0, 6).map((t) => dbZeile(t.text || "", String(t.createdAt || "").slice(0, 10))).join("") || emptyMini("Noch nichts notiert.")}</div>
+           <form class="quick-add" data-form="db-thought"><span>＋</span><input name="text" placeholder="Gedanke, Frage, Beobachtung" autocomplete="off"><button class="btn primary small-btn" type="submit">Notieren</button></form>`)}
+
+        ${dbSection(6, "▤", "Leseliste", b.leseliste.length,
+          `<div class="item-list">${b.leseliste.slice(0, 8).map((r) => dbZeile(itemTitle(r, "Eintrag"), r.completedAt ? "gelesen" : (r.author || ""), r.completedAt ? "done" : "")).join("") || emptyMini("Leseliste leer.")}</div>`,
+          `<button data-action="go" data-route="reading">Bibliothek</button>`)}
+
+        ${dbSection(6, "★", "Generelle Ziele", b.ziele.length,
+          `<div class="item-list">${b.ziele.slice(0, 8).map((g) => dbZeile(itemTitle(g, "Ziel"), g.status || "")).join("") || emptyMini("Keine Ziele.")}</div>`,
+          `<button data-action="go" data-route="goals">Alle</button>`)}
+
+        ${dbSection(6, "▦", "Projekte im Briefing", b.projekte.length,
+          `<div class="item-list">${b.projekte.map((p) => dbZeile(itemTitle(p, "Projekt"), p.status || "")).join("") || emptyMini("Keine Projekte fürs Briefing gewählt.")}</div>`)}
+
+        ${dbSection(6, "▩", "Programme im Briefing", b.programme.length,
+          `<div class="item-list">${b.programme.map((p) => dbZeile(itemTitle(p, "Programm"), p.status || "")).join("") || emptyMini("Keine Programme fürs Briefing gewählt.")}</div>`)}
+
+        ${dbSection(6, "◍", "Reflexionsfragen", b.reflexionsfragen.length,
+          `<div class="item-list">${b.reflexionsfragen.slice(0, 10).map((q) => dbZeile(q.text, `${q.projekt}${q.heuteBeantwortet ? " · heute beantwortet" : ""}`, q.heuteBeantwortet ? "done" : "")).join("") || emptyMini("Keine Reflexionsfragen hinterlegt.")}</div>`)}
+
+        ${dbSection(6, "✎", "Tägliche Notizen", "",
+          `<form data-form="db-note"><textarea name="notes" rows="5" style="width:100%;resize:vertical;font-family:inherit;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--surface2);color:var(--text)" placeholder="Was war heute?">${esc(b.notizen)}</textarea><button class="btn primary small-btn" type="submit" style="margin-top:8px">Notiz sichern</button></form>`)}
+
+        ${dbSection(12, "▥", "Vergangene Tage", b.vergangeneTage.length,
+          `<div class="chip-row">${b.vergangeneTage.map((t) => `<button class="chip" data-action="db-day" data-tag="${attr(t)}">${esc(t.slice(8) + "." + t.slice(5,7) + ".")}</button>`).join("") || emptyMini("Noch keine Historie.")}</div>`)}
+
       </div>
     </div>`;
   }
@@ -1442,6 +1637,20 @@
       await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),{ title, description:"", status:"open", source:"tablet-quick-add" }),{silent:true});
       toast(`${COLLECTION_CONFIG[name].label} erstellt`, title, "ok");
       requestAnimationFrame(() => { const next=document.querySelector("[data-quickadd]"); if (next) next.focus(); });
+    } else if (type === "db-goal") {
+      const titel = String(data.get("title") || "").trim();
+      if (!titel) return;
+      await executeOperation(makeOperation("briefing","goal-add",null,Core.makeId("dg"),
+        { date: state.dbTag || localDateKey(), title: titel }));
+      form.reset();
+    } else if (type === "db-thought") {
+      const text = String(data.get("text") || "").trim();
+      if (!text) return;
+      await executeOperation(makeOperation("briefing","thought-add",null,Core.makeId("tp"), { text: text }));
+      form.reset();
+    } else if (type === "db-note") {
+      await executeOperation(makeOperation("briefing","note",null,Core.makeId("note"),
+        { date: state.dbTag || localDateKey(), notes: String(data.get("notes") || "") }));
     } else if (type === "habit") {
       const id = Core.makeId("habit");
       closeOverlay();
@@ -1546,11 +1755,62 @@
       await executeOperation(makeOperation("entity","update","tasks",task.id,{ status:isDone(task)?"open":"done", completedAt:isDone(task)?null:new Date().toISOString() }),{silent:true}); return;
     }
     if (action === "new-habit") { openHabitForm(); return; }
+    /*
+     * BEFUND: hier wurde completedDates/lastCompleted geschrieben — Felder,
+     * die die Hauptapp gar nicht liest. Sie fuehrt completions[{date,value}]
+     * und, bei Routinen mit Schritten, subCompletions[]. Ein Haken auf dem
+     * Tablet kam auf dem Desktop und dem Handy also nie an.
+     *
+     * Jetzt wird beides geschrieben: das Format der Hauptapp und, damit
+     * bestehende Tabletdaten nicht verloren gehen, weiterhin completedDates.
+     */
     if (action === "toggle-habit") {
       const habit = activeHabits().find((item) => item.id === button.dataset.id); if (!habit) return;
-      const today = localDateKey(); const dates = asArray(habit.completedDates || habit.dates).slice(); const index = dates.indexOf(today);
-      if (index >= 0) dates.splice(index,1); else dates.push(today);
-      await executeOperation(makeOperation("habit","update",null,habit.id,{ completedDates:dates,lastCompleted:index>=0?null:today }),{silent:true}); return;
+      const tag = state.dbTag || localDateKey();
+      const subs = habitSubUnits(habit);
+      const patch = {};
+
+      if (subs.length) {
+        // Mit Schritten: alle in die Richtung schalten, die noch fehlt.
+        const alleFertig = subs.every((u) => habitSubDone(habit, u.name, tag));
+        const rest = asArray(habit.subCompletions).filter((c) => !(c && c.date === tag));
+        patch.subCompletions = alleFertig ? rest : rest.concat(subs.map((u) => ({
+          id: "sc_" + Math.random().toString(36).slice(2, 8),
+          date: tag, subUnitName: u.name, completedAt: new Date().toISOString()
+        })));
+        const ohneAuto = asArray(habit.completions).filter((c) => !(c && c.date === tag && c.autoFromSubUnits));
+        patch.completions = alleFertig ? ohneAuto : ohneAuto.concat([{
+          id: "hc_" + Math.random().toString(36).slice(2, 8), date: tag, value: habit.target || 1, autoFromSubUnits: true
+        }]);
+      } else {
+        const vorhanden = asArray(habit.completions).some((c) => c && c.date === tag);
+        patch.completions = vorhanden
+          ? asArray(habit.completions).filter((c) => !(c && c.date === tag))
+          : asArray(habit.completions).concat([{ date: tag, value: habit.target || 1 }]);
+        const dates = asArray(habit.completedDates || habit.dates).slice();
+        const i = dates.indexOf(tag);
+        if (i >= 0) dates.splice(i, 1); else dates.push(tag);
+        patch.completedDates = dates;
+        patch.lastCompleted = vorhanden ? null : tag;
+      }
+      await executeOperation(makeOperation("habit","update",null,habit.id,patch),{silent:true}); return;
+    }
+
+    // ── Daily Briefing ──
+    if (action === "db-day") {
+      const heute = localDateKey();
+      if (button.dataset.tag === "heute") state.dbTag = heute;
+      else if (button.dataset.tag) state.dbTag = button.dataset.tag;
+      else {
+        const d = new Date((state.dbTag || heute) + "T12:00:00");
+        d.setDate(d.getDate() + Number(button.dataset.tage || 0));
+        state.dbTag = localDateKey(d);
+      }
+      render(); return;
+    }
+    if (action === "db-toggle-goal") {
+      await executeOperation(makeOperation("briefing","goal-toggle",null,button.dataset.id,
+        { date: state.dbTag || localDateKey() }),{silent:true}); return;
     }
     if (action === "new-flashcard") { openFlashcardForm(); return; }
     if (action === "edit-flashcard") { openFlashcardForm(button.dataset.id); return; }
