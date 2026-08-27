@@ -679,6 +679,7 @@
           <div class="hero-date">${esc(date)}</div>
           <h1 class="hero-title">Guten ${new Date().getHours() < 12 ? "Morgen" : new Date().getHours() < 18 ? "Tag" : "Abend"}, Laurin.</h1>
           <p class="muted">${state.user ? "Dein Tablet arbeitet mit demselben Quantus-Datenstand wie AI Sync." : "Verbinde die Tablet-App, um deinen aktuellen Quantus-Tag zu laden."}</p>
+          ${briefingHero()}
           <div class="metric-row">
             <div class="metric"><strong>${tasks.length}</strong><small>offene Aufgaben</small></div>
             <div class="metric"><strong>${tasks.filter(isOverdue).length}</strong><small>überfällig</small></div>
@@ -717,6 +718,60 @@
   }
 
   function emptyMini(text) { return `<div class="muted small" style="padding:18px 4px">${esc(text)}</div>`; }
+
+  /*
+   * DAS BRIEFING IM HERO.
+   *
+   * BEFUND: Der Startbildschirm begruesste, zeigte vier Zahlen und einen Knopf
+   * "Daily Briefing oeffnen" — den Tag selbst sah man erst nach einem Klick.
+   * Auf einem Tablet, das man morgens aufklappt, ist das die falsche
+   * Reihenfolge.
+   *
+   * Der Block nimmt DIESELBEN Quellen wie renderDaily (todayEvents,
+   * todayMeetings, todayTasks, activeHabits, dailyBriefing.beliefs). Er rechnet
+   * nichts eigenes — sonst koennten Hero und Briefing verschiedene Zahlen
+   * zeigen.
+   */
+  function briefingHero() {
+    const termine = [...todayEvents(), ...todayMeetings()]
+      .sort((a, b) => String(a.start || a.time || a.startTime || "").localeCompare(String(b.start || b.time || b.startTime || "")));
+    const naechster = termine[0];
+    const tasks = todayTasks();
+    const ueberfaellig = tasks.filter(isOverdue);
+    const habits = activeHabits();
+    const erledigt = habits.filter(isHabitDoneToday).length;
+    const beliefs = asArray(state.payload.dailyBriefing && state.payload.dailyBriefing.beliefs);
+
+    const zeilen = [];
+    if (naechster) {
+      zeilen.push(`<li><b>${esc(formatTime(naechster.start || naechster.time || naechster.startTime) || "—")}</b> ${esc(itemTitle(naechster) || "Termin")}</li>`);
+    }
+    if (tasks.length) {
+      zeilen.push(`<li><b>${tasks.length}</b> ${tasks.length === 1 ? "Aufgabe heute" : "Aufgaben heute"}${ueberfaellig.length ? ` · <span class="hero-warn">${ueberfaellig.length} überfällig</span>` : ""}</li>`);
+    }
+    if (habits.length) {
+      zeilen.push(`<li><b>${erledigt}/${habits.length}</b> Routinen erledigt</li>`);
+    }
+    if (!zeilen.length) zeilen.push("<li>Nichts Dringendes — freier Lauf.</li>");
+    const erster = beliefs.length ? beliefs[0] : null;
+    const satz = erster ? (asMap(erster).text || String(erster)) : "";
+
+    return `<div class="hero-briefing">
+      <div class="hero-briefing-head">☀️ Dein Tag</div>
+      <ul class="hero-briefing-list">${zeilen.join("")}</ul>
+      ${satz ? `<div class="hero-briefing-belief">${esc(satz)}</div>` : ""}
+    </div>`;
+  }
+
+  // Erledigt-Stempel wie in der Routinen-Ansicht — hier gebraucht, damit der
+  // Hero denselben Stand zeigt wie das Briefing.
+  function isHabitDoneToday(habit) {
+    const today = new Date().toISOString().slice(0, 10);
+    const done = habit && (habit.completions || habit.erledigt || habit.done);
+    if (Array.isArray(done)) return done.some((entry) => String(entry && (entry.date || entry)).slice(0, 10) === today);
+    if (done && typeof done === "object") return Boolean(done[today]);
+    return false;
+  }
 
   function renderDaily() {
     const tasks = todayTasks();
@@ -828,8 +883,16 @@
     const url = doc.downloadUrl || doc.fileUrl || "";
     const isPdf = /pdf/i.test(doc.mimeType || doc.dateiname || "");
     const text = doc.textauszug || doc.text || "";
-    return `<div class="panel-head"><button class="icon-action" data-action="external-url" data-url="${attr(url)}" ${url ? "" : "disabled"}>↗</button><strong class="truncate">${esc(name)}</strong><button class="btn small-btn" data-action="polaris-selection" data-text="${attr(name)}">Polaris</button></div>
-      <div class="reader-content" data-reader="true">${isPdf && url ? `<iframe title="${attr(name)}" src="${attr(url)}#toolbar=0&navpanes=0"></iframe>` : `<article><h1>${esc(name)}</h1><p>${text ? esc(text) : "Für dieses Dokument ist noch kein Textauszug vorhanden. Öffne das Original über den Pfeil oben."}</p></article>`}</div>`;
+    return `<div class="panel-head"><button class="icon-action" data-action="reader-wide" title="Bibliothek ein-/ausblenden">◫</button><button class="icon-action" data-action="reader-full" title="Vollbild">⛶</button><button class="icon-action" data-action="external-url" data-url="${attr(url)}" ${url ? "" : "disabled"}>↗</button><strong class="truncate">${esc(name)}</strong><button class="btn small-btn" data-action="polaris-selection" data-text="${attr(name)}">Polaris</button></div>
+      ${isPdf && url
+        // PDF: EIGENER Behaelter ohne Lesepolster. Vorher steckte das Dokument
+        // in .reader-content mit 24 px oben/unten und bis zu 54 px seitlich —
+        // Polster, das ein Fliesstext braucht und ein PDF nur verkleinert.
+        // Und #toolbar=0&navpanes=0 schaltete die Werkzeugleiste des Betrachters
+        // AB: kein Zoom, keine Seitenzahl, keine Suche. Genau das machte das
+        // Lesen unangenehm. Beides ist jetzt umgekehrt.
+        ? `<div class="reader-pdf" data-reader="true"><iframe title="${attr(name)}" src="${attr(url)}#view=FitH" allowfullscreen></iframe></div>`
+        : `<div class="reader-content" data-reader="true"><article><h1>${esc(name)}</h1><p>${text ? esc(text) : "Für dieses Dokument ist noch kein Textauszug vorhanden. Öffne das Original über den Pfeil oben."}</p></article></div>`}`;
   }
 
   function findMapKey(map, object) {
@@ -1493,6 +1556,19 @@
     if (action === "edit-flashcard") { openFlashcardForm(button.dataset.id); return; }
     if (action === "open-doc") { state.selectedDocId=button.dataset.id; if (state.route !== "reading") go("reading"); else render(); return; }
     if (action === "external") { openExternal(button.dataset.path); return; }
+    // Lesen: mehr Flaeche fuer das Dokument. Beides sind reine Ansichtsschalter
+    // — kein Datenzugriff, keine Navigation.
+    if (action === "reader-wide") {
+      document.querySelector(".reading-layout")?.classList.toggle("library-hidden");
+      return;
+    }
+    if (action === "reader-full") {
+      const panel = document.querySelector(".reader-panel");
+      if (!panel) return;
+      if (document.fullscreenElement) { document.exitFullscreen?.(); return; }
+      (panel.requestFullscreen || panel.webkitRequestFullscreen)?.call(panel);
+      return;
+    }
     if (action === "external-url") { openExternalUrl(button.dataset.url); return; }
     if (action === "external-translate") { openExternalUrl(`https://translate.google.com/?sl=auto&tl=de&text=${encodeURIComponent(button.dataset.text || "")}`); return; }
     if (action === "translate-selection") { await translateSelection(button.dataset.text || ""); return; }

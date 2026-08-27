@@ -14,3 +14,16 @@
 .qt-route .qt-route-empty { color: var(--muted, #8b94a3); font-size: 14px; padding: 8px 0 4px; }
 .qt-bar { height: 6px; border-radius: 4px; background: rgba(255, 255, 255, .10); overflow: hidden; margin: 8px 0 4px; }
 .qt-bar-fill { height: 100%; border-radius: 4px; background: currentColor; opacity: .85; }
+
+/* ── Briefing im Hero ────────────────────────────────────────────────────────
+   Der Startbildschirm zeigte nur eine Begruessung und einen Knopf. Jetzt steht
+   der Tag selbst da — vor allem anderen. */
+.hero-briefing { margin: 14px 0 4px; padding: 12px 14px; border-radius: 14px;
+  background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08); }
+.hero-briefing-head { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .65; }
+.hero-briefing-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.hero-briefing-list li { font-size: 15px; line-height: 1.45; }
+.hero-briefing-list b { font-weight: 700; }
+.hero-warn { color: #e2725b; font-weight: 700; }
+.hero-briefing-belief { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .08);
+  font-size: 13.5px; font-style: italic; opacity: .8; }
