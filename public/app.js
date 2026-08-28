@@ -148,6 +148,10 @@
     "home", "dashboard", "mail", "flowertech", "daily", "dailybriefing", "reading",
     "learning", "habits", "budget", "polaris", "concepts", "calendar", "workspace",
     "split", "settings", "apps", "bm", "leseplan", "career",
+    // Statistiken und Berichte rendert renderRoute() selbst. Sie fehlten hier,
+    // und weil der App-Bildschirm seine Einordnung aus dieser Liste zieht,
+    // meldete er sie faelschlich als "ohne eigene Tablet-Ansicht".
+    "statistics", "reports",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -175,7 +179,10 @@
     drafts: loadJson(LOCAL_KEYS.drafts, {}),
     snapshotAt: null,
     splitLeft: "reading",
-    splitRight: "notes"
+    splitRight: "notes",
+    // Der App-Bildschirm: Suchtext und Darstellung (Raster oder Liste).
+    appsSearch: "",
+    appsView: "grid"
   };
   // Warteschlange beim Start direkt verdichten: alte Mehrfach-Operationen auf
   // demselben Element schrumpfen zu einer, kaputte Eintraege werden entfernt.
@@ -1155,16 +1162,116 @@
     </div>`;
   }
 
+  /*
+   * DER APP-BILDSCHIRM.
+   *
+   * Vorher war das ein reines Kachelraster, und jede Kachel trug die
+   * Einordnung „Tablet" oder „Separat" — letzteres hiess: diese App laesst
+   * sich hier gar nicht bedienen, sie schickt dich in die Desktop-App. Seit
+   * jedes Modul eine eigene Tablet-Ansicht hat, gibt es „Separat" nicht mehr.
+   *
+   * Der Bildschirm zeigt jetzt, was man auf einem App-Bildschirm sucht:
+   * Suche ueber alle Apps, die zuletzt benutzten zuoberst, Gruppen, die
+   * lebenden Zahlen der Apps (faellige Aufgaben, Karten, ungelesene Mails)
+   * und die Wahl zwischen Raster und Liste.
+   */
+  const RECENT_APPS_KEY = "quantus-tablet-recent-apps-v1";
+
+  function recentApps() {
+    return asArray(loadJson(RECENT_APPS_KEY, [])).filter((key) => typeof key === "string");
+  }
+
+  function rememberApp(route) {
+    if (!route || route === "apps" || route === "home") return;
+    const list = recentApps().filter((key) => key !== route);
+    list.unshift(route);
+    saveJson(RECENT_APPS_KEY, list.slice(0, 8));
+  }
+
+  // Wie viele offene Dinge in einer App warten. Dieselben Zahlen wie auf dem
+  // Homebildschirm — zwei Rechnungen fuer dieselbe App waeren zwei Wahrheiten.
+  function appBadge(key) {
+    try {
+      if (key === "tasks" || key === "daily" || key === "dailybriefing") return todayTasks().length;
+      if (key === "learning") return dueCards().length;
+      if (key === "mail" || key === "gmail") return typeof window.QuantusMailUnread === "function" ? window.QuantusMailUnread() : 0;
+      if (key === "projects") return collection("projects").filter((item) => !isDone(item)).length;
+      if (key === "updates") return collection("updates").filter((item) => !item.checked).length;
+      if (key === "messages") {
+        const now = new Date().toISOString();
+        return collection("scheduledMessages").filter((item) => !item.isRead && String(item.deliverAt || "") <= now).length;
+      }
+      if (key === "time") return Object.keys(asMap(state.payload.timers)).length;
+      if (COLLECTION_CONFIG[key]) return collection(key).filter((item) => !isDone(item)).length;
+    } catch (_) {}
+    return 0;
+  }
+
+  // Eine Route ist nativ, wenn app.js sie selbst rendert ODER ein
+  // Tablet-Modul sie beansprucht. Fest verdrahten liesse die Liste beim
+  // naechsten neuen Modul still veralten.
+  function isNativeRoute(key) {
+    if (NATIVE_ROUTES.has(key)) return true;
+    return tabletModules().some((mod) => Array.isArray(mod.routes) && mod.routes.includes(key));
+  }
+
   function appTile(app) {
-    const action = `data-action="go" data-route="${attr(app.key)}"`;
-    const native = app.local || NATIVE_ROUTES.has(app.key);
-    const scope = `<small>${native ? "Tablet" : "Separat"}</small>`;
-    return `<button class="app-tile" ${action}><span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span><strong>${esc(app.label)}</strong>${scope}</button>`;
+    const badge = appBadge(app.key);
+    return `<button class="app-tile" data-action="go" data-route="${attr(app.key)}" title="${attr(app.label)}">
+      <span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}${badge > 0 ? `<span class="app-tile-badge">${badge > 99 ? "99+" : badge}</span>` : ""}</span>
+      <strong>${esc(app.label)}</strong></button>`;
+  }
+
+  function appRow(app) {
+    const badge = appBadge(app.key);
+    return `<button class="app-row" data-action="go" data-route="${attr(app.key)}">
+      <span class="app-icon ${attr(app.tone || "")}">${esc(app.icon)}</span>
+      <span class="app-row-main"><strong>${esc(app.label)}</strong><small>${esc(app.group || "Weitere")}</small></span>
+      ${badge > 0 ? `<span class="badge accent">${badge}</span>` : ""}
+      <span class="app-row-go">›</span></button>`;
   }
 
   function renderApps() {
-    const groups = [...new Set(APP_DEFS.map((app) => app.group || "Weitere"))];
-    return `<div class="view apps-catalog">${viewHeader("Alle Apps", "Der vollständige AI-Sync-Funktionsumfang in der tabletoptimierten Quantus-Hülle.", "")}${groups.map((group) => `<section class="app-group"><div class="app-group-head"><h2>${esc(group)}</h2><span class="badge">${APP_DEFS.filter((app) => (app.group || "Weitere") === group).length}</span></div><div class="apps-grid">${APP_DEFS.filter((app) => (app.group || "Weitere") === group).map(appTile).join("")}</div></section>`).join("")}</div>`;
+    const query = String(state.appsSearch || "").trim().toLowerCase();
+    const list = state.appsView === "list" ? appRow : appTile;
+    const uniqueApps = [];
+    const seen = new Set();
+    APP_DEFS.forEach((app) => {
+      if (seen.has(app.key)) return;
+      seen.add(app.key);
+      uniqueApps.push(app);
+    });
+    const hits = query
+      ? uniqueApps.filter((app) => `${app.label} ${app.group || ""} ${app.key}`.toLowerCase().includes(query))
+      : uniqueApps;
+    const recent = recentApps().map((key) => uniqueApps.find((app) => app.key === key)).filter(Boolean);
+    const groups = [...new Set(hits.map((app) => app.group || "Weitere"))];
+    const notNative = uniqueApps.filter((app) => !app.local && !isNativeRoute(app.key));
+
+    const sections = query
+      ? `<section class="app-group"><div class="app-group-head"><h2>${hits.length} Treffer</h2></div>
+          <div class="${state.appsView === "list" ? "apps-list" : "apps-grid"}">${hits.map(list).join("") || emptyMini("Keine App mit diesem Namen")}</div></section>`
+      : `${recent.length ? `<section class="app-group"><div class="app-group-head"><h2>Zuletzt benutzt</h2><span class="badge">${recent.length}</span></div>
+          <div class="${state.appsView === "list" ? "apps-list" : "apps-grid"}">${recent.map(list).join("")}</div></section>` : ""}
+        ${groups.map((group) => {
+          const inGroup = hits.filter((app) => (app.group || "Weitere") === group);
+          return `<section class="app-group"><div class="app-group-head"><h2>${esc(group)}</h2><span class="badge">${inGroup.length}</span></div>
+            <div class="${state.appsView === "list" ? "apps-list" : "apps-grid"}">${inGroup.map(list).join("")}</div></section>`;
+        }).join("")}`;
+
+    return `<div class="view apps-catalog">
+      ${viewHeader("Alle Apps", `${uniqueApps.length} Quantus-Apps – jede mit einer eigenen Tablet-Ansicht.`,
+        `<button class="btn" data-action="apps-arrange">▤ Homescreen anordnen</button>`)}
+      <div class="filterbar apps-filterbar">
+        <div class="search-field"><span>⌕</span><input data-action="apps-search" placeholder="App suchen" value="${attr(state.appsSearch || "")}" autocomplete="off"></div>
+        <div class="chip-row">
+          <button class="chip ${state.appsView !== "list" ? "on" : ""}" data-action="apps-view" data-view="grid">▦ Raster</button>
+          <button class="chip ${state.appsView === "list" ? "on" : ""}" data-action="apps-view" data-view="list">▤ Liste</button>
+        </div>
+      </div>
+      ${notNative.length ? `<p class="muted small" style="margin:0 2px 14px">${notNative.length} App(en) ohne eigene Tablet-Ansicht: ${esc(notNative.map((app) => app.label).join(", "))}</p>` : ""}
+      ${sections}
+    </div>`;
   }
 
   function renderCalendar() {
@@ -1395,6 +1502,7 @@
     state.route = getRoute();
     viewTitle.textContent = ROUTE_TITLES[state.route] || "Quantus";
     document.querySelectorAll("[data-dock]").forEach((button) => button.classList.toggle("on", button.dataset.dock === state.route));
+    rememberApp(state.route);
     main.innerHTML = renderRoute(state.route);
     // Beim Wechsel der Ansicht oben beginnen, sonst landet man mitten in der
     // neuen Seite. Bei reinen Datenaktualisierungen bleibt die Position.
@@ -1532,9 +1640,10 @@
     sheet("Synchronisation", `<div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Firebase-Pfad</small><strong>${esc(APP_STORE_PATH)}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Vorgemerkt</small><strong>${state.pending.length} Änderung(en)</strong></div></div><p class="muted small">Tablet-Änderungen werden atomar in den aktuellen AI-Sync-Datenstand eingefügt und zusätzlich über die Polaris-Inbox gespiegelt. Dadurch bleiben parallele Änderungen erhalten.</p><div class="sheet-foot"><button class="btn primary" data-action="flush-sync">Jetzt abgleichen</button></div>`);
   }
 
-  function openAppsSheet() {
-    sheet("Alle Quantus Apps", `<div class="apps-grid">${APP_DEFS.map(appTile).join("")}</div>`, "wide");
-  }
+  // Der Apps-Knopf im Dock fuehrt auf den App-Bildschirm. Vorher oeffnete er
+  // ein Blatt ueber der App: darin liess sich weder suchen noch der
+  // Homebildschirm anordnen, und es verdeckte die Ansicht darunter.
+  function openAppsSheet() { go("apps"); }
 
   function openPolarisSheet(prefill) {
     sheet("Polaris", `<div class="polaris-hero"><div class="polaris-orb"></div><h2>Quantus, aber gesprächig.</h2><p class="muted">Erstelle direkt Aufgaben, Notizen und Projekte oder wechsle in den vollständigen Sprachmodus.</p></div>${polarisCommandBox().replace('name="command"','name="command" value="'+attr(prefill || "")+'"')}`, "polaris-sheet");
@@ -1816,6 +1925,8 @@
     if (action === "edit-flashcard") { openFlashcardForm(button.dataset.id); return; }
     if (action === "open-doc") { state.selectedDocId=button.dataset.id; if (state.route !== "reading") go("reading"); else render(); return; }
     if (action === "external") { openExternal(button.dataset.path); return; }
+    if (action === "apps-view") { state.appsView = button.dataset.view === "list" ? "list" : "grid"; render(); return; }
+    if (action === "apps-arrange") { go("home"); window.QuantusTabletSpringboard?.startArrange?.(); return; }
     // Lesen: mehr Flaeche fuer das Dokument. Beides sind reine Ansichtsschalter
     // — kein Datenzugriff, keine Navigation.
     if (action === "reader-wide") {
@@ -1853,6 +1964,18 @@
         searchDebounce = null;
         render();
         requestAnimationFrame(()=>{const input=document.querySelector('[data-action="filter-collection"]');if(input){input.focus();input.setSelectionRange(state.search.length,state.search.length);}});
+      }, 140);
+    }
+    if (event.target.matches('[data-action="apps-search"]')) {
+      state.appsSearch = event.target.value;
+      if (searchDebounce) clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        searchDebounce = null;
+        render();
+        requestAnimationFrame(() => {
+          const input = document.querySelector('[data-action="apps-search"]');
+          if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+        });
       }, 140);
     }
     if (event.target.matches('[data-action="global-search"]')) { const target=document.getElementById("searchResults"); if(target)target.innerHTML=searchResults(event.target.value); }
@@ -1924,6 +2047,10 @@
     getDatabase: () => db,
     // Bausteine fuer die Tablet-Module (Homebildschirm, Mail, FlowerTech)
     render, scheduleRender, sheet, closeOverlay, appBaseUrl, viewHeader, emptyState, emptyMini,
+    // Die nativen Modulansichten (native-modules.js) bauen auf denselben
+    // Bausteinen auf wie app.js — der Anmeldehinweis und das Oeffnen einer
+    // externen Adresse gehoeren dazu.
+    loginBanner, openExternalUrl, asArray, asMap, values, isDeleted,
     esc, attr, formatDate, formatTime, relativeTime, money, itemTitle, itemText, isDone,
     localDateKey, todayTasks, dueCards, activeHabits, APP_DEFS, COLLECTION_CONFIG,
     // Der Homebildschirm ist ein eigenes Modul (springboard.js) und ueberschreibt

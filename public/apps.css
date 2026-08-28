@@ -219,3 +219,57 @@
   border: 1px solid var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent);
   font-size: 13px; color: var(--text);
 }
+
+/* ==========================================================================
+   ANORDNEN DES HOMEBILDSCHIRMS
+   Sichtbarer Modus: die Symbole wackeln, das aufgehobene steht hervor, und
+   jede Flaeche, die ein Symbol aufnehmen kann, zeigt das auch an. Ausserhalb
+   des Modus greift nichts davon — der Bildschirm sieht aus wie immer.
+   ========================================================================== */
+.sb-dockhint b { color: var(--accent); }
+.sb-dockhint-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+.springboard.arranging .sb-app.arranging .sb-icon { animation: sb-wiggle 0.42s ease-in-out infinite; }
+.springboard.arranging .sb-app:nth-child(2n) .sb-icon { animation-delay: .1s; }
+.springboard.arranging .sb-app:nth-child(3n) .sb-icon { animation-delay: .19s; }
+@keyframes sb-wiggle {
+  0%, 100% { transform: rotate(-1.1deg); }
+  50% { transform: rotate(1.1deg); }
+}
+/* Wer das Wackeln nicht sehen will, bekommt es auch nicht. */
+@media (prefers-reduced-motion: reduce) {
+  .springboard.arranging .sb-app .sb-icon { animation: none; }
+}
+
+.sb-app.picked .sb-icon {
+  outline: 3px solid var(--accent); outline-offset: 3px;
+  box-shadow: 0 10px 26px color-mix(in oklab, var(--accent) 45%, transparent);
+  animation: none; transform: scale(1.06);
+}
+.sb-app.drop-target .sb-icon { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.sb-app.dragging { opacity: .3; }
+
+/* Das Minuszeichen nimmt ein Symbol aus dem Dock. */
+.sb-remove {
+  position: absolute; top: -7px; left: -7px; width: 22px; height: 22px;
+  border-radius: 999px; background: var(--danger); color: #fff;
+  font: 900 15px/20px var(--font); text-align: center;
+  border: 2px solid var(--surface-base);
+}
+
+/* Freie Flaeche am Ende einer Seite und im Dock: hier kann abgelegt werden. */
+.sb-drop-end {
+  display: grid; place-items: center; min-height: 62px; border-radius: 18px;
+  border: 2px dashed var(--border2); color: var(--muted); font-size: 22px;
+  cursor: pointer;
+}
+.sb-drop-end:hover { border-color: var(--accent); color: var(--accent); }
+.sb-dock .sb-drop-end { width: 56px; height: 56px; min-height: 0; border-radius: 17px; }
+
+/* Das gezogene Symbol haengt am Finger und faengt selbst keine Ereignisse. */
+.sb-ghost {
+  position: fixed; z-index: 9999; pointer-events: none; opacity: .92;
+  transform: translate(-50%, -50%) scale(1.08);
+  background: none; border: 0; padding: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}

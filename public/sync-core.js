@@ -23,6 +23,43 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  /*
+   * LISTENBEREICHE.
+   *
+   * Die nativen Modulansichten (Journal, Reflecta, Reviews, Leseliste,
+   * Schnellnotizen, Hintergrunddokumente) schreiben nicht in `entities`,
+   * sondern in Arrays mit Id — genau dort, wo AI Sync sie liest
+   * (ai-sync public/index.html, emptyData()). Ohne eigene Operationsart
+   * haette ein Formular in diesen Ansichten stumm gar nichts getan.
+   *
+   * Die Liste ist bewusst eine WEISSE LISTE: eine Operation darf nur in
+   * einen dieser Pfade schreiben. Ein freier Pfad aus einer Operation waere
+   * ein Schreibrecht auf den ganzen Datenstand.
+   */
+  const LIST_AREAS = [
+    "journal.documents",
+    "journal.selfLetters",
+    "journal.topics",
+    "reflections",
+    "reviews",
+    "readingList",
+    "quickTodos",
+    "backgroundDocs"
+  ];
+
+  function listAreaTarget(payload, area) {
+    if (LIST_AREAS.indexOf(area) < 0) return null;
+    const parts = area.split(".");
+    let host = payload;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      if (!isObject(host[parts[i]])) host[parts[i]] = {};
+      host = host[parts[i]];
+    }
+    const key = parts[parts.length - 1];
+    if (!Array.isArray(host[key])) host[key] = [];
+    return host[key];
+  }
+
   function makeEmptyPayload() {
     return {
       entities: {
@@ -73,6 +110,16 @@
     if (!Array.isArray(payload.recallLabData.decks)) payload.recallLabData.decks = [];
     if (!Array.isArray(payload.recallLabData.reviewLogs)) payload.recallLabData.reviewLogs = [];
     if (!isObject(payload.meta)) payload.meta = {};
+    // Bereiche der nativen Modulansichten (Journal, Reflecta, Leseliste,
+    // Reviews, Schnellnotizen). Sie liegen dort, wo AI Sync sie ohnehin
+    // anlegt — ein eigener Ablageort waere ein zweiter Datenstand.
+    if (!Array.isArray(payload.journal.documents)) payload.journal.documents = [];
+    if (!Array.isArray(payload.journal.selfLetters)) payload.journal.selfLetters = [];
+    LIST_AREAS.forEach((area) => {
+      if (area.indexOf(".") >= 0) return;
+      if (!Array.isArray(payload[area])) payload[area] = [];
+    });
+    if (!isObject(payload.timers)) payload.timers = {};
     // FlowerTech liegt ausserhalb von entities (gleiche Struktur wie in AI Sync):
     // Offerten und Rechnungen sind Dokumentlisten mit Positionen.
     if (!isObject(payload.flowertech)) payload.flowertech = {};
@@ -259,6 +306,61 @@
     return { applied: true, reason: "flowertech-updated" };
   }
 
+  /*
+   * Eintraege in einem Listenbereich: anlegen, aendern, loeschen. Dieselbe
+   * Regel wie ueberall sonst — ist der Serverstand neuer als die Operation,
+   * gewinnt der Server. Sonst wuerde ein Tablet, das lange offline war,
+   * beim Nachsynchronisieren neuere Eintraege ueberschreiben.
+   */
+  function applyListOperation(payload, operation) {
+    const list = listAreaTarget(payload, operation.collection);
+    if (!list) return { applied: false, reason: "unknown-list-area" };
+    if (!operation.id) return { applied: false, reason: "invalid-list-operation" };
+
+    const index = list.findIndex((item) => item && item.id === operation.id);
+    const existing = index >= 0 ? list[index] : null;
+    if (existing && currentTime(existing) > operationTime(operation)) {
+      return { applied: false, reason: "newer-remote-version" };
+    }
+    if (operation.action === "delete") {
+      if (index >= 0) list.splice(index, 1);
+      return { applied: true, reason: "list-entry-deleted" };
+    }
+    const item = {
+      ...(existing || { id: operation.id, createdAt: operation.updatedAt }),
+      ...(isObject(operation.patch) ? clone(operation.patch) : {}),
+      id: operation.id,
+      updatedAt: operation.updatedAt
+    };
+    if (index >= 0) list[index] = item;
+    else list.push(item);
+    return { applied: true, reason: "list-entry-updated" };
+  }
+
+  /*
+   * Laufende Zeitmessung. `timers` ist in AI Sync eine Karte taskId → Timer;
+   * gestoppt wird sie dort, indem der Eintrag entfernt und ein timeEntry
+   * angelegt wird. Das Tablet macht es genauso — die fertige Zeitbuchung ist
+   * eine gewoehnliche Entity-Operation auf `timeEntries`, damit beide
+   * Oberflaechen dieselbe Buchung sehen.
+   */
+  function applyTimerOperation(payload, operation) {
+    if (!operation.id) return { applied: false, reason: "invalid-timer-operation" };
+    if (!isObject(payload.timers)) payload.timers = {};
+    if (operation.action === "delete") {
+      delete payload.timers[operation.id];
+      return { applied: true, reason: "timer-stopped" };
+    }
+    const patch = isObject(operation.patch) ? clone(operation.patch) : {};
+    payload.timers[operation.id] = {
+      ...(isObject(payload.timers[operation.id]) ? payload.timers[operation.id] : {}),
+      ...patch,
+      taskId: operation.id,
+      startTs: patch.startTs || operation.updatedAt
+    };
+    return { applied: true, reason: "timer-started" };
+  }
+
   function applyOperation(input, operation) {
     const payload = normalisePayload(input);
     let result;
@@ -268,6 +370,8 @@
     else if (operation.kind === "briefing") result = applyBriefingOperation(payload, operation);
     else if (operation.kind === "flashcard") result = applyFlashcardOperation(payload, operation);
     else if (operation.kind === "flowertech") result = applyFlowerTechOperation(payload, operation);
+    else if (operation.kind === "list") result = applyListOperation(payload, operation);
+    else if (operation.kind === "timer") result = applyTimerOperation(payload, operation);
     else result = { applied: false, reason: "unsupported-operation" };
 
     if (result.applied) {
@@ -304,10 +408,25 @@
   function isValidOperation(operation) {
     if (!isObject(operation)) return false;
     if (!operation.id || typeof operation.id !== "string") return false;
-    if (!["entity", "habit", "flashcard", "flowertech"].includes(operation.kind)) return false;
+    if (!["entity", "habit", "briefing", "flashcard", "flowertech", "list", "timer"].includes(operation.kind)) return false;
     if (operation.kind === "entity" && (!operation.collection || typeof operation.collection !== "string")) return false;
     if (operation.kind === "flowertech" && !["offers", "invoices"].includes(operation.collection)) return false;
-    if (operation.action && !["create", "update", "delete"].includes(operation.action)) return false;
+    // Eine Listenoperation darf nur in einen der bekannten Bereiche schreiben.
+    // Ein freier Pfad waere ein Schreibrecht auf den ganzen Datenstand.
+    if (operation.kind === "list" && LIST_AREAS.indexOf(operation.collection) < 0) return false;
+    /*
+     * BEFUND: hier stand nur ["create","update","delete"], und die Liste der
+     * erlaubten Arten kannte "briefing" gar nicht. compactQueue() filtert die
+     * Warteschlange aber mit genau dieser Pruefung. Ein Tagesziel, ein
+     * Gedanke oder eine Tagesnotiz, OFFLINE erfasst, flog damit stumm aus der
+     * Warteschlange — die Eingabe war beim naechsten Start spurlos weg,
+     * obwohl applyOperation() diese Operationen laengst ausfuehren kann.
+     */
+    const BRIEFING_ACTIONS = ["note", "goal-add", "goal-toggle", "goal-delete", "thought-add", "thought-delete"];
+    const allowed = operation.kind === "briefing"
+      ? BRIEFING_ACTIONS
+      : ["create", "update", "delete"];
+    if (operation.action && !allowed.includes(operation.action)) return false;
     if (operation.patch != null && !isObject(operation.patch)) return false;
     return true;
   }
@@ -317,7 +436,30 @@
   // ein Delete ersetzt alle vorherigen Schritte). Ungueltige Eintraege fliegen
   // raus. Das haelt localStorage klein und macht das Nachsynchronisieren schnell.
   function compactQueue(operations) {
-    const list = (Array.isArray(operations) ? operations : []).filter(isValidOperation);
+    const all = (Array.isArray(operations) ? operations : []).filter(isValidOperation);
+    /*
+     * Briefing-Operationen duerfen NICHT verdichtet werden.
+     *
+     * Das Verdichten fasst mehrere Operationen auf demselben Element zu einer
+     * zusammen und setzt dabei action auf "create" oder "update". Fuer eine
+     * Entity stimmt das. Ein Briefing-Schritt traegt seine Bedeutung aber IM
+     * NAMEN der Aktion ("goal-add", "goal-toggle", "thought-add"): aus
+     * "goal-add" wurde beim Verdichten "update", und applyBriefingOperation
+     * kennt kein "update" — die Operation lief danach ins Leere.
+     * Ausserdem sind zwei "goal-toggle" zusammen ein Nichts, keine Aenderung.
+     * Sie bleiben deshalb einzeln und in ihrer Reihenfolge stehen; doppelt
+     * eingereihte werden nur ueber die operationId entfernt.
+     */
+    const keepInOrder = [];
+    const seen = new Set();
+    all.filter((operation) => operation.kind === "briefing").forEach((operation) => {
+      const key = operation.operationId || `${operation.kind}::${operation.action}::${operation.id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      keepInOrder.push(clone(operation));
+    });
+
+    const list = all.filter((operation) => operation.kind !== "briefing");
     const groups = new Map();
     list.forEach((operation) => {
       const key = [operation.kind, operation.collection || "", operation.id].join("::");
@@ -341,6 +483,7 @@
       if (last.operationId) merged.operationId = last.operationId;
       compacted.push(merged);
     });
+    compacted.push(...keepInOrder);
     compacted.sort((a, b) => operationTime(a) - operationTime(b));
     return compacted;
   }
@@ -403,6 +546,38 @@
       );
     });
     merged.meta = parseTime(a.meta.updatedAt) >= parseTime(b.meta.updatedAt) ? clone(a.meta) : clone(b.meta);
+
+    /*
+     * AUFFANGZWEIG — derselbe Befund wie in AI Sync (CLAUDE.md, Fallstrick 2).
+     *
+     * mergePayloads baute das Ergebnis bisher aus makeEmptyPayload() und
+     * ergaenzte nur die Bereiche, fuer die es oben einen Zweig gibt. Alles
+     * andere fiel still heraus. Solange das Tablet in diese Bereiche nur
+     * LAS, fiel das nicht auf. Mit den nativen Modulansichten schreibt es
+     * dort — Journal, Reflexionen, Reviews, Leseliste, Zeitmessung —, und
+     * ein Backup-Einspielen haette sie damit geloescht.
+     *
+     * Regel: Bereiche mit Id werden nach Id vereinigt (der neuere Stand
+     * gewinnt), alles Uebrige nimmt den Stand von b, sonst den von a.
+     */
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(merged, key)) return;
+      if (Array.isArray(a[key]) || Array.isArray(b[key])) {
+        const listA = Array.isArray(a[key]) ? a[key] : [];
+        const listB = Array.isArray(b[key]) ? b[key] : [];
+        const hasIds = [...listA, ...listB].some((item) => isObject(item) && item.id != null);
+        merged[key] = hasIds ? mergeById(listA, listB) : clone(listB.length ? listB : listA);
+        return;
+      }
+      if (isObject(a[key]) && isObject(b[key])) { merged[key] = { ...clone(a[key]), ...clone(b[key]) }; return; }
+      merged[key] = clone(b[key] === undefined ? a[key] : b[key]);
+    });
+    // Das Journal ist eine Karte mit Listen darin — die Listen einzeln
+    // vereinigen, sonst gewinnt eine ganze Seite und die andere geht verloren.
+    merged.journal = { ...clone(a.journal), ...clone(b.journal) };
+    ["documents", "selfLetters", "topics"].forEach((key) => {
+      merged.journal[key] = mergeById(a.journal && a.journal[key], b.journal && b.journal[key]);
+    });
     return merged;
   }
 
