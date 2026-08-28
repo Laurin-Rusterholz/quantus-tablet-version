@@ -165,6 +165,7 @@
     smarterDocs: {},
     selectedDocId: null,
     dbTag: null,          // gewaehlter Tag im Daily Briefing (null = heute)
+    budgetMonat: null,    // gewaehlter Monat im Budget (null = laufender)
     pending: [],
     settings: loadJson(LOCAL_KEYS.settings, { aiSyncUrl: DEFAULT_AI_SYNC_URL, theme: "dark" }),
     deviceId: getDeviceId(),
@@ -1133,25 +1134,139 @@
     </div>`;
   }
 
-  function budgetData() {
+  /*
+   * BEFUND: expense summierte die rohen Betraege. Eine Ausgabe traegt aber ein
+   * NEGATIVES Vorzeichen (so schreiben Desktop und Handy), also war expense
+   * negativ — und der Saldo income - expense ADDIERTE die Ausgaben. Bei 3000
+   * Einnahmen und 92.50 Ausgaben stand dort 3092.50 statt 2907.50.
+   *
+   * Massgeblich ist ausserdem das VORZEICHEN, nicht das type-Feld: aus dem
+   * CSV-Import und aus aelteren Bestaenden kommen Buchungen ohne type.
+   */
+  function budgetData(ym) {
     const accounts = collection("accounts");
     const tx = collection("transactions").filter((item) => !item.isFuture);
-    const ym = localDateKey().slice(0,7);
-    const month = tx.filter((item) => String(item.date || "").startsWith(ym));
-    const income = month.filter((item) => item.type === "income").reduce((sum,item) => sum + (Number(item.amount)||0),0);
-    const expense = month.filter((item) => item.type === "expense").reduce((sum,item) => sum + (Number(item.amount)||0),0);
+    const monat = ym || (state.budgetMonat || localDateKey().slice(0, 7));
+    const month = tx.filter((item) => String(item.date || "").startsWith(monat));
+    const betrag = (item) => Number(item.amount) || 0;
+    const income = month.filter((item) => betrag(item) > 0).reduce((sum, item) => sum + betrag(item), 0);
+    const expense = month.filter((item) => betrag(item) < 0).reduce((sum, item) => sum + Math.abs(betrag(item)), 0);
     const balance = accounts.reduce((sum,item) => sum + (Number(item.balance)||0),0);
-    return { accounts, tx, month, income, expense, balance, currency: accounts[0] && accounts[0].currency || "CHF" };
+    const kategorien = {};
+    month.filter((item) => betrag(item) < 0).forEach((item) => {
+      const k = item.category || "Sonstiges";
+      kategorien[k] = (kategorien[k] || 0) + Math.abs(betrag(item));
+    });
+    return { accounts, tx, month, monat, income, expense, balance,
+      kategorien: Object.entries(kategorien).sort((a, b) => b[1] - a[1]),
+      currency: accounts[0] && accounts[0].currency || "CHF" };
   }
 
+  var BUDGET_KATEGORIEN = ["Essen", "Transport", "Wohnen", "Einkauf", "Gesundheit",
+    "Freizeit", "Bildung", "Abo", "Sonstiges"];
+
+  function budgetMonatVerschieben(ym, n) {
+    const [j, m] = ym.split("-").map(Number);
+    const d = new Date(j, m - 1 + n, 1);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+  function budgetMonatText(ym) {
+    const [j, m] = ym.split("-").map(Number);
+    return new Date(j, m - 1, 1).toLocaleDateString("de-CH", { month: "long", year: "numeric" });
+  }
+
+  /*
+   * BEFUND: das Budget war auf dem Tablet ausdruecklich "Nur lesen". Erfassen
+   * ging nur am Desktop oder am Handy — auf dem Geraet, das man beim Einkaufen
+   * am ehesten dabei hat, gar nicht.
+   *
+   * Erfasst wird ueber dieselbe Entitaets-Operation wie jede andere Sammlung
+   * und im FORMAT der anderen Geraete: der Betrag traegt sein Vorzeichen,
+   * negativ heisst Ausgabe. Ein positiver Betrag mit type "expense" wuerde auf
+   * Desktop und Handy als Einnahme zaehlen.
+   */
   function renderBudget() {
-    const data = budgetData();
-    const latest = data.tx.sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).slice(0,12);
+    const heuteYm = localDateKey().slice(0, 7);
+    const ym = state.budgetMonat || heuteYm;
+    const data = budgetData(ym);
+    const latest = data.month.slice()
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const maxKat = data.kategorien.length ? data.kategorien[0][1] : 1;
+    const tage = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+    const bisher = ym === heuteYm ? Number(localDateKey().slice(8, 10)) : tage;
+
     return `<div class="view">
-      ${viewHeader("Budget", "Eine sichere Leseansicht deiner bestehenden Quantus-Finanzdaten.", `<span class="badge sand">Nur lesen</span>`)}
+      ${viewHeader("Budget", budgetMonatText(ym),
+        `<button class="btn" data-action="budget-monat" data-n="-1">‹ Vormonat</button>` +
+        (ym === heuteYm ? "" : `<button class="btn" data-action="budget-monat" data-n="0">Aktueller Monat</button>`) +
+        `<button class="btn" data-action="budget-monat" data-n="1">Folgemonat ›</button>`)}
       ${loginBanner()}
-      <div class="budget-metrics"><div class="budget-metric"><small>Kontostand</small><strong>${money(data.balance,data.currency)}</strong></div><div class="budget-metric"><small>Einnahmen im Monat</small><strong style="color:var(--accent)">${money(data.income,data.currency)}</strong></div><div class="budget-metric"><small>Ausgaben im Monat</small><strong style="color:var(--coral)">${money(data.expense,data.currency)}</strong></div><div class="budget-metric"><small>Monatssaldo</small><strong>${money(data.income-data.expense,data.currency)}</strong></div></div>
-      <section class="widget"><div class="widget-head"><span class="widget-icon">₣</span><h2>Letzte Buchungen</h2></div><div class="item-list">${latest.map((item) => `<div class="list-item"><span class="badge ${item.type === "income" ? "accent" : "coral"}">${item.type === "income" ? "+" : "−"}</span><div class="item-main"><div class="item-title">${esc(item.description || item.category || "Buchung")}</div><div class="item-meta">${esc(formatDate(item.date))} · ${esc(item.category || "")}</div></div><strong>${money(item.amount,data.currency)}</strong></div>`).join("") || emptyMini("Keine Budgetdaten vorhanden")}</div></section>
+
+      <div class="budget-metrics">
+        <div class="budget-metric"><small>Kontostand</small><strong>${money(data.balance, data.currency)}</strong></div>
+        <div class="budget-metric"><small>Einnahmen</small><strong style="color:var(--accent)">${money(data.income, data.currency)}</strong></div>
+        <div class="budget-metric"><small>Ausgaben</small><strong style="color:var(--coral)">${money(data.expense, data.currency)}</strong></div>
+        <div class="budget-metric"><small>Saldo</small><strong>${money(data.income - data.expense, data.currency)}</strong></div>
+        <div class="budget-metric"><small>⌀ pro Tag</small><strong>${money(bisher ? data.expense / bisher : 0, data.currency)}</strong></div>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="widget span-5 tall">
+          <div class="widget-head"><span class="widget-icon">＋</span><h2>Erfassen</h2></div>
+          <form data-form="budget-tx" class="budget-form">
+            <div class="chip-row" role="group" aria-label="Art">
+              <button type="button" class="chip on" data-action="budget-typ" data-typ="expense">− Ausgabe</button>
+              <button type="button" class="chip" data-action="budget-typ" data-typ="income">＋ Einnahme</button>
+            </div>
+            <input type="hidden" name="typ" value="expense">
+            <div class="field"><label>Betrag</label>
+              <input name="amount" type="number" step="0.05" min="0" inputmode="decimal" required
+                     placeholder="0.00" class="budget-amount"></div>
+            <div class="field"><label>Kategorie</label>
+              <select name="category">${BUDGET_KATEGORIEN.map((k) => `<option value="${attr(k)}">${esc(k)}</option>`).join("")}</select></div>
+            <div class="field"><label>Notiz</label><input name="description" autocomplete="off"></div>
+            <div class="field"><label>Datum</label>
+              <input name="date" type="date" value="${attr(ym === heuteYm ? localDateKey() : ym + "-01")}"></div>
+            ${data.accounts.length ? `<div class="field"><label>Konto</label>
+              <select name="accountId"><option value="">Ohne Konto</option>${data.accounts.map((k) =>
+                `<option value="${attr(k.id)}">${esc(itemTitle(k, "Konto"))}</option>`).join("")}</select></div>` : ""}
+            <button class="btn primary" type="submit" style="width:100%">Buchung sichern</button>
+          </form>
+        </section>
+
+        <section class="widget span-7 tall">
+          <div class="widget-head"><span class="widget-icon">₣</span><h2>Buchungen</h2>
+            <span class="badge accent">${data.month.length}</span></div>
+          <div class="item-list">${latest.map((item) => {
+            const neg = (Number(item.amount) || 0) < 0;
+            return `<div class="list-item">
+              <span class="badge ${neg ? "coral" : "accent"}">${neg ? "−" : "+"}</span>
+              <div class="item-main"><div class="item-title">${esc(item.description || item.category || "Buchung")}</div>
+                <div class="item-meta">${esc(formatDate(item.date))} · ${esc(item.category || "")}</div></div>
+              <strong>${money(item.amount, data.currency)}</strong>
+              <button class="btn ghost small-btn" data-action="budget-loeschen" data-id="${attr(item.id)}"
+                      aria-label="Buchung löschen">🗑</button>
+            </div>`;
+          }).join("") || emptyMini("Keine Buchungen in diesem Monat.")}</div>
+        </section>
+
+        <section class="widget span-6">
+          <div class="widget-head"><span class="widget-icon">▦</span><h2>Kategorien</h2></div>
+          <div class="item-list">${data.kategorien.map(([k, v]) => `<div class="list-item">
+            <div class="item-main"><div class="item-title">${esc(k)}</div>
+              <div class="budget-bar"><span style="width:${Math.round(v / maxKat * 100)}%"></span></div></div>
+            <strong>${money(v, data.currency)}</strong></div>`).join("") || emptyMini("Keine Ausgaben in diesem Monat.")}</div>
+        </section>
+
+        <section class="widget span-6">
+          <div class="widget-head"><span class="widget-icon">◫</span><h2>Konten</h2></div>
+          <div class="item-list">${data.accounts.map((k) => `<div class="list-item">
+            <div class="item-main"><div class="item-title">${esc(itemTitle(k, "Konto"))}</div>
+              <div class="item-meta">${esc(k.type || "")}</div></div>
+            <strong>${money(k.balance, k.currency || data.currency)}</strong></div>`).join("")
+            || emptyMini("Keine Konten hinterlegt.")}</div>
+        </section>
+      </div>
     </div>`;
   }
 
@@ -1637,6 +1752,25 @@
       await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),{ title, description:"", status:"open", source:"tablet-quick-add" }),{silent:true});
       toast(`${COLLECTION_CONFIG[name].label} erstellt`, title, "ok");
       requestAnimationFrame(() => { const next=document.querySelector("[data-quickadd]"); if (next) next.focus(); });
+    } else if (type === "budget-tx") {
+      const roh = Math.abs(Number(data.get("amount")) || 0);
+      if (!roh) { toast("Betrag fehlt", "Bitte einen Betrag eingeben", "warn"); return; }
+      const typ = String(data.get("typ") || "expense");
+      const patch = {
+        // Vorzeichen im Betrag — dasselbe Format wie Desktop und Handy.
+        amount: typ === "income" ? roh : -roh,
+        type: typ,
+        category: String(data.get("category") || "Sonstiges"),
+        description: String(data.get("description") || "").trim(),
+        date: String(data.get("date") || localDateKey()),
+        accountId: String(data.get("accountId") || "") || null,
+        source: "tablet"
+      };
+      await executeOperation(makeOperation("entity", "create", "transactions", Core.makeId("txn"), patch));
+      form.reset();
+      const typFeld = form.querySelector('[name="typ"]');
+      if (typFeld) typFeld.value = "expense";
+      toast("Buchung erfasst", money(patch.amount), "ok");
     } else if (type === "db-goal") {
       const titel = String(data.get("title") || "").trim();
       if (!titel) return;
@@ -1794,6 +1928,36 @@
         patch.lastCompleted = vorhanden ? null : tag;
       }
       await executeOperation(makeOperation("habit","update",null,habit.id,patch),{silent:true}); return;
+    }
+
+    // ── Budget ──
+    if (action === "budget-monat") {
+      const heuteYm = localDateKey().slice(0, 7);
+      const n = Number(button.dataset.n || 0);
+      state.budgetMonat = n === 0 ? null : budgetMonatVerschieben(state.budgetMonat || heuteYm, n);
+      render(); return;
+    }
+    if (action === "budget-typ") {
+      // Nur die Sichtbarkeit umschalten — der Wert reist im versteckten Feld
+      // mit, damit das Formular beim Absenden nicht raten muss.
+      const form = button.closest("form");
+      if (!form) return;
+      form.querySelectorAll('[data-action="budget-typ"]').forEach((b) => {
+        b.classList.toggle("on", b === button);
+      });
+      const feld = form.querySelector('[name="typ"]');
+      if (feld) feld.value = button.dataset.typ || "expense";
+      return;
+    }
+    if (action === "budget-loeschen") {
+      const id = button.dataset.id;
+      const tx = collection("transactions").find((t) => t && t.id === id);
+      if (!tx) return;
+      // Rueckfrage: der Papierkorb liegt einen Daumen neben dem Betrag.
+      if (!window.confirm(`Buchung löschen?\n\n${itemTitle(tx, tx.category || "Buchung")} · ${money(tx.amount)}`)) return;
+      await executeOperation(makeOperation("entity", "delete", "transactions", id, {}));
+      toast("Buchung gelöscht", itemTitle(tx, tx.category || ""), "ok");
+      return;
     }
 
     // ── Daily Briefing ──
