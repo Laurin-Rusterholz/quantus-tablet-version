@@ -11,7 +11,8 @@
     userId: "",
     refs: [],
     mounted: false,
-    renderTimer: null
+    renderTimer: null,
+    lastMarkup: ""
   };
 
   function api() { return global.__quantusTablet || null; }
@@ -136,7 +137,7 @@
   }
 
   function hubHtml() {
-    return '<section id="quantusLearningHub" class="qt-learning-hub"><div class="qt-learning-head"><div><span>LESEN & WEITERBILDEN</span><h2>Dein Lerncockpit</h2><p>BM, Smarter, Leseplan, Career Model und Pinnboards werden live aktualisiert.</p></div><button type="button" data-qu-action="toggle" class="qt-device-summary">⇄ ' + esc(deviceSummary()) + '</button></div><div class="qt-learning-grid">' + bmCard() + smarterCard() + leseplanCard() + careerCard() + canvasCard() + '</div></section>';
+    return '<section id="quantusLearningHub" class="qt-learning-hub"><div class="qt-learning-head"><div><span>LESEN &amp; WEITERBILDEN</span><h2>Dein Lerncockpit</h2><p>BM, Smarter, Leseplan, Career Model und Pinnboards werden live aktualisiert.</p></div><button type="button" data-qu-action="toggle" class="qt-device-summary">⇄ ' + esc(deviceSummary()) + '</button></div><div class="qt-learning-grid">' + bmCard() + smarterCard() + leseplanCard() + careerCard() + canvasCard() + '</div></section>';
   }
 
   function injectCareerIcon(springboard) {
@@ -158,17 +159,41 @@
     target.appendChild(button);
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  BEFUND (gemessen, Chromium): das Lerncockpit wurde 37-mal in 2000 ms
+  //  komplett ersetzt — alle ~54 ms. Das war das Flimmern, und es verschluckte
+  //  jeden Tipp: ein Fingertipp dauert 100–300 ms, die Karte verschwand also
+  //  zwischen Beruehrung und Loslassen und der Browser sendete gar kein
+  //  click-Ereignis mehr. Gemessen mit einem Tipp von 120 ms: null Klicks.
+  //
+  //  URSACHE: der Vergleich "existing.outerHTML !== markup" verglich unser
+  //  erzeugtes Markup mit der SERIALISIERUNG des DOM — und die ist nie
+  //  zeichengleich. Der Browser schreibt "LESEN &amp; WEITERBILDEN" zurueck,
+  //  wo unsere Zeichenkette "LESEN & WEITERBILDEN" sagt; ebenso wird aus
+  //  esc()s &#039; wieder ein blosses '. Der Vergleich war damit IMMER
+  //  ungleich → Ersetzen → die MutationObserver auf #main sah die Aenderung
+  //  → scheduleRender (50 ms) → Ersetzen → … eine Endlosschleife.
+  //
+  //  Deshalb wird jetzt gegen das zuletzt SELBST erzeugte Markup verglichen.
+  //  Das ist der einzige Vergleich, der ueberhaupt aussagekraeftig ist: er
+  //  beantwortet die Frage "haben sich meine Daten geaendert?" statt der
+  //  Frage "serialisiert der Browser so wie ich?".
+  // ══════════════════════════════════════════════════════════════════════
   function renderHomeExpansion() {
     var springboard = global.document.querySelector(".springboard");
     if (!springboard) return;
     var markup = hubHtml();
     var existing = springboard.querySelector("#quantusLearningHub");
     if (existing) {
-      if (existing.outerHTML !== markup) existing.outerHTML = markup;
+      if (state.lastMarkup !== markup) {
+        existing.outerHTML = markup;
+        state.lastMarkup = markup;
+      }
     } else {
       var top = springboard.querySelector(".sb-top");
       if (top) top.insertAdjacentHTML("afterend", markup);
       else springboard.insertAdjacentHTML("afterbegin", markup);
+      state.lastMarkup = markup;
     }
     injectCareerIcon(springboard);
   }
