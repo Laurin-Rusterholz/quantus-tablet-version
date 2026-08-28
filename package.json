@@ -4,7 +4,7 @@
   "private": true,
   "description": "Touchoptimierte Quantus-Tablet-PWA mit gemeinsamer AI-Sync-Datenbasis",
   "scripts": {
-    "test": "node tests/sync-core.test.cjs && node tests/no-inbox-mirror.test.cjs && node tests/workspace.test.cjs && node tests/structure.test.cjs && node tests/device-expansion.test.cjs && node tests/lernrouten.test.cjs && node tests/briefing-pdf.test.cjs && node tests/briefing-vollstaendig.test.cjs && node tests/lerncockpit-flimmern.test.cjs",
+    "test": "node tests/sync-core.test.cjs && node tests/no-inbox-mirror.test.cjs && node tests/workspace.test.cjs && node tests/structure.test.cjs && node tests/device-expansion.test.cjs && node tests/lernrouten.test.cjs && node tests/briefing-pdf.test.cjs && node tests/briefing-vollstaendig.test.cjs && node tests/lerncockpit-flimmern.test.cjs && node tests/anmeldung.test.cjs",
     "check": "node --check public/sync-core.js && node --check public/tablet-workspace.js && node --check public/app.js && node --check public/quantus-tablet-expansion.js && node --check public/springboard.js && node --check public/mail-app.js && node --check public/flowertech-app.js && node --check public/sw.js && npm test"
   }
 }

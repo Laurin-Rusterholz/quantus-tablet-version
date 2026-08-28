@@ -1,4 +1,4 @@
-const CACHE = "quantus-tablet-v14-lerncockpit-tipp";
+const CACHE = "quantus-tablet-v15-anmeldung-redirect";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
   "/quantus-tablet-expansion.css",

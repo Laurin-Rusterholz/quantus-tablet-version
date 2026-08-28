@@ -160,6 +160,7 @@
     remoteReady: false,
     syncStatus: "offline",
     syncMessage: "Nicht angemeldet",
+    authFehler: null,     // letzter Anmeldefehler {code, text} — bleibt sichtbar
     lastSync: null,
     driveDocs: {},
     smarterDocs: {},
@@ -421,6 +422,18 @@
       db = firebaseApp.database(RTDB_URL);
       storage = firebaseApp.storage();
       auth.setPersistence(window.firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+      // Rueckkehr aus signInWithRedirect abschliessen. Ohne diesen Aufruf
+      // bleibt ein Fehler auf dem Rueckweg (haeufig auth/unauthorized-domain)
+      // vollstaendig unsichtbar: die App startet einfach wieder abgemeldet,
+      // und es sieht aus, als haette man nie auf "Anmelden" getippt.
+      try {
+        auth.getRedirectResult().then((ergebnis) => {
+          if (ergebnis && ergebnis.user) {
+            state.authFehler = null;
+            toast("Angemeldet", "Die gemeinsamen Quantus-Daten werden geladen.", "ok");
+          }
+        }).catch((error) => { meldeAuthFehler(error); });
+      } catch (_) {}
       auth.onAuthStateChanged(handleAuth, (error) => {
         state.authReady = true;
         setSync("error", error.message);
@@ -481,23 +494,105 @@
     listen(smarterRef, "value", (snapshot) => { state.smarterDocs = asMap(snapshot.val()); scheduleRender(); }, () => {});
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  ANMELDUNG AUF DEM TABLET
+  //
+  //  BEFUND (gemessen, Chromium, echte index.html): signIn() rief
+  //  ausschliesslich signInWithPopup. Kam von dort ein Fehler, war Schluss —
+  //  eine Meldung mit dem rohen Firebase-Text und kein zweiter Weg:
+  //      Popup blockiert          → ["signInWithPopup"] → "Anmeldung fehlgeschlagen"
+  //      Standalone nicht moeglich → ["signInWithPopup"] → "Anmeldung fehlgeschlagen"
+  //      Popup sofort geschlossen  → ["signInWithPopup"] → "Anmeldung fehlgeschlagen"
+  //  Und beim Start wurde getRedirectResult NIE aufgerufen (gemessen:
+  //  nur ["setPersistence"]) — eine Anmeldung ueber Weiterleitung konnte
+  //  also gar nicht ankommen.
+  //
+  //  Das trifft genau das Tablet: die App laeuft als installierte PWA
+  //  ("display": "standalone"). Dort liefert window.open haeufig kein
+  //  nutzbares Fenster — iPadOS oeffnet die Anmeldung in Safari, der
+  //  Rueckkanal zum Opener fehlt, Firebase meldet auth/popup-blocked oder
+  //  auth/operation-not-supported-in-this-environment. Es ist dasselbe
+  //  Muster, an dem schon die Lern-Apps scheiterten (openWindow).
+  //
+  //  drive.html im Hauptprojekt geht diesen Weg laengst: Popup versuchen,
+  //  bei Popup-Fehlern auf signInWithRedirect ausweichen, beim Start
+  //  getRedirectResult abholen. Das Tablet macht es jetzt genauso.
+  //
+  //  Das Popup bleibt bewusst der erste Versuch: es ist der einzige Weg,
+  //  der ohne Verlassen der App auskommt, und wo es funktioniert, soll es
+  //  auch weiter benutzt werden. Die Weiterleitung ist der Ausweg, nicht
+  //  der Ersatz.
+  // ══════════════════════════════════════════════════════════════════════
+
+  // Fehler, bei denen das Popup selbst der Grund ist — nicht die Anmeldung.
+  const POPUP_FEHLER = new Set([
+    "auth/popup-blocked",
+    "auth/operation-not-supported-in-this-environment",
+    "auth/web-storage-unsupported"
+  ]);
+
+  function authFehlerText(error) {
+    const code = (error && error.code) || "";
+    if (code === "auth/unauthorized-domain")
+      return "Diese Domain ist in Firebase Authentication nicht als autorisierte Domain eingetragen.";
+    if (code === "auth/popup-blocked")
+      return "Das Anmeldefenster wurde blockiert.";
+    if (code === "auth/operation-not-supported-in-this-environment")
+      return "In der installierten App ist kein Anmeldefenster moeglich.";
+    if (code === "auth/network-request-failed")
+      return "Keine Verbindung zu Google — Netz, VPN oder Inhaltsblocker pruefen.";
+    if (code === "auth/operation-not-allowed")
+      return "Google-Anmeldung ist im Firebase-Projekt nicht aktiviert.";
+    if (code === "auth/internal-error")
+      return "Firebase meldet einen internen Fehler — meist eine nicht freigegebene Domain.";
+    return (error && error.message) || "Unbekannter Fehler.";
+  }
+
+  // Der Fehlercode bleibt stehen, nicht nur als fluechtige Einblendung: nach
+  // einer Weiterleitung ist die Einblendung laengst weg, und ohne den Code
+  // laesst sich nicht sagen, WAS zu tun ist.
+  function meldeAuthFehler(error) {
+    if (!error) return;
+    const code = (error && error.code) || "";
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return;
+    state.authFehler = { code: code || "ohne Code", text: authFehlerText(error) };
+    setSync("error", `Anmeldung: ${state.authFehler.code}`);
+    toast("Anmeldung fehlgeschlagen", `${state.authFehler.text} (${state.authFehler.code})`, "error");
+    scheduleRender();
+  }
+
   async function signIn() {
     if (!auth) return toast("Anmeldung nicht verfügbar", "Firebase wurde nicht geladen.", "error");
+    const provider = new window.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    state.authFehler = null;
     try {
-      const provider = new window.firebase.auth.GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
       await auth.signInWithPopup(provider);
       closeOverlay();
       toast("Angemeldet", "Die gemeinsamen Quantus-Daten werden geladen.", "ok");
+      return;
     } catch (error) {
-      if (error.code === "auth/unauthorized-domain") {
-        toast("Domain noch nicht autorisiert", "Füge die Tablet-Domain in Firebase Authentication unter Autorisierte Domains ein.", "error");
-      } else toast("Anmeldung fehlgeschlagen", error.message, "error");
+      // Bewusst abgebrochen — keine Weiterleitung, keine Meldung.
+      if (error && error.code === "auth/popup-closed-by-user") return;
+      if (error && error.code === "auth/cancelled-popup-request") return;
+      if (error && POPUP_FEHLER.has(error.code)) {
+        try {
+          toast("Anmeldung wird geöffnet", "Das Tablet wechselt kurz zu Google und kommt danach zurück.");
+          await auth.signInWithRedirect(provider);
+          return;   // die Seite verlaesst sich selbst; es geht bei
+                    // getRedirectResult weiter
+        } catch (zweiter) {
+          meldeAuthFehler(zweiter);
+          return;
+        }
+      }
+      meldeAuthFehler(error);
     }
   }
 
   async function signOut() {
     if (!auth) return;
+    state.authFehler = null;
     await auth.signOut();
     closeOverlay();
     toast("Abgemeldet", "Lokal bleiben keine neuen Quantus-Daten sichtbar.");
@@ -613,9 +708,16 @@
 
   function loginBanner() {
     if (state.user) return "";
+    // Ein gescheiterter Anmeldeversuch darf nicht mit der Einblendung
+    // verschwinden — nach einer Weiterleitung ist sie ohnehin weg. Der Code
+    // steht hier, weil erst er sagt, was zu tun ist.
+    const fehler = state.authFehler
+      ? `<p class="muted" style="color:var(--danger,#e06c75)">${esc(state.authFehler.text)} <strong>(${esc(state.authFehler.code)})</strong></p>`
+      : "";
     return `<section class="widget span-12" style="min-height:auto;border-color:var(--accent)">
       <div class="widget-head"><span class="widget-icon">↪</span><h2>Mit AI Sync verbinden</h2></div>
       <p class="muted">Melde dich einmal mit demselben Google-Konto wie in Quantus an. Danach verwendet die Tablet-App dieselben Daten wie AI Sync.</p>
+      ${fehler}
       <button class="btn primary" data-action="sign-in">Mit Google anmelden</button>
     </section>`;
   }
@@ -1529,7 +1631,14 @@
   }
 
   function openSyncSheet() {
-    sheet("Synchronisation", `<div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Firebase-Pfad</small><strong>${esc(APP_STORE_PATH)}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Vorgemerkt</small><strong>${state.pending.length} Änderung(en)</strong></div></div><p class="muted small">Tablet-Änderungen werden atomar in den aktuellen AI-Sync-Datenstand eingefügt und zusätzlich über die Polaris-Inbox gespiegelt. Dadurch bleiben parallele Änderungen erhalten.</p><div class="sheet-foot"><button class="btn primary" data-action="flush-sync">Jetzt abgleichen</button></div>`);
+    // Der Spiegel nach polaris/inbox ist seit F-23 entfernt — der Text hier
+    // versprach ihn trotzdem weiter. Eine Erklaerung, die nicht mehr stimmt,
+    // ist schlimmer als keine: sie laesst einen an der falschen Stelle suchen.
+    const konto = state.user ? (state.user.email || state.user.displayName || "angemeldet") : "nicht angemeldet";
+    const fehler = state.authFehler
+      ? `<p class="muted small" style="color:var(--danger,#e06c75)">Anmeldung: ${esc(state.authFehler.text)} <strong>(${esc(state.authFehler.code)})</strong></p>`
+      : "";
+    sheet("Synchronisation", `<div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Konto</small><strong>${esc(konto)}</strong></div><div class="detail-block"><small>Firebase-Pfad</small><strong>${esc(APP_STORE_PATH)}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Vorgemerkt</small><strong>${state.pending.length} Änderung(en)</strong></div></div>${fehler}<p class="muted small">Tablet-Änderungen werden als Firebase-Transaktion in den aktuellen AI-Sync-Datenstand eingefügt — derselbe Knoten, den auch AI Sync und das Handy lesen. Dadurch bleiben parallele Änderungen erhalten.</p><div class="sheet-foot">${state.user ? `<button class="btn primary" data-action="flush-sync">Jetzt abgleichen</button>` : `<button class="btn primary" data-action="sign-in">Mit Google anmelden</button>`}</div>`);
   }
 
   function openAppsSheet() {
