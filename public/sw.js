@@ -1,4 +1,4 @@
-const CACHE = "quantus-tablet-v14-native-apps-anordnen";
+const CACHE = "quantus-tablet-v17-native-apps-anordnen";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
   "/quantus-tablet-expansion.css", "/native-modules.css",

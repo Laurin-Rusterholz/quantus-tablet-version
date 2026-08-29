@@ -164,11 +164,13 @@
     remoteReady: false,
     syncStatus: "offline",
     syncMessage: "Nicht angemeldet",
+    authFehler: null,     // letzter Anmeldefehler {code, text} — bleibt sichtbar
     lastSync: null,
     driveDocs: {},
     smarterDocs: {},
     selectedDocId: null,
     dbTag: null,          // gewaehlter Tag im Daily Briefing (null = heute)
+    budgetMonat: null,    // gewaehlter Monat im Budget (null = laufender)
     pending: [],
     settings: loadJson(LOCAL_KEYS.settings, { aiSyncUrl: DEFAULT_AI_SYNC_URL, theme: "dark" }),
     deviceId: getDeviceId(),
@@ -428,6 +430,18 @@
       db = firebaseApp.database(RTDB_URL);
       storage = firebaseApp.storage();
       auth.setPersistence(window.firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+      // Rueckkehr aus signInWithRedirect abschliessen. Ohne diesen Aufruf
+      // bleibt ein Fehler auf dem Rueckweg (haeufig auth/unauthorized-domain)
+      // vollstaendig unsichtbar: die App startet einfach wieder abgemeldet,
+      // und es sieht aus, als haette man nie auf "Anmelden" getippt.
+      try {
+        auth.getRedirectResult().then((ergebnis) => {
+          if (ergebnis && ergebnis.user) {
+            state.authFehler = null;
+            toast("Angemeldet", "Die gemeinsamen Quantus-Daten werden geladen.", "ok");
+          }
+        }).catch((error) => { meldeAuthFehler(error); });
+      } catch (_) {}
       auth.onAuthStateChanged(handleAuth, (error) => {
         state.authReady = true;
         setSync("error", error.message);
@@ -488,23 +502,105 @@
     listen(smarterRef, "value", (snapshot) => { state.smarterDocs = asMap(snapshot.val()); scheduleRender(); }, () => {});
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  ANMELDUNG AUF DEM TABLET
+  //
+  //  BEFUND (gemessen, Chromium, echte index.html): signIn() rief
+  //  ausschliesslich signInWithPopup. Kam von dort ein Fehler, war Schluss —
+  //  eine Meldung mit dem rohen Firebase-Text und kein zweiter Weg:
+  //      Popup blockiert          → ["signInWithPopup"] → "Anmeldung fehlgeschlagen"
+  //      Standalone nicht moeglich → ["signInWithPopup"] → "Anmeldung fehlgeschlagen"
+  //      Popup sofort geschlossen  → ["signInWithPopup"] → "Anmeldung fehlgeschlagen"
+  //  Und beim Start wurde getRedirectResult NIE aufgerufen (gemessen:
+  //  nur ["setPersistence"]) — eine Anmeldung ueber Weiterleitung konnte
+  //  also gar nicht ankommen.
+  //
+  //  Das trifft genau das Tablet: die App laeuft als installierte PWA
+  //  ("display": "standalone"). Dort liefert window.open haeufig kein
+  //  nutzbares Fenster — iPadOS oeffnet die Anmeldung in Safari, der
+  //  Rueckkanal zum Opener fehlt, Firebase meldet auth/popup-blocked oder
+  //  auth/operation-not-supported-in-this-environment. Es ist dasselbe
+  //  Muster, an dem schon die Lern-Apps scheiterten (openWindow).
+  //
+  //  drive.html im Hauptprojekt geht diesen Weg laengst: Popup versuchen,
+  //  bei Popup-Fehlern auf signInWithRedirect ausweichen, beim Start
+  //  getRedirectResult abholen. Das Tablet macht es jetzt genauso.
+  //
+  //  Das Popup bleibt bewusst der erste Versuch: es ist der einzige Weg,
+  //  der ohne Verlassen der App auskommt, und wo es funktioniert, soll es
+  //  auch weiter benutzt werden. Die Weiterleitung ist der Ausweg, nicht
+  //  der Ersatz.
+  // ══════════════════════════════════════════════════════════════════════
+
+  // Fehler, bei denen das Popup selbst der Grund ist — nicht die Anmeldung.
+  const POPUP_FEHLER = new Set([
+    "auth/popup-blocked",
+    "auth/operation-not-supported-in-this-environment",
+    "auth/web-storage-unsupported"
+  ]);
+
+  function authFehlerText(error) {
+    const code = (error && error.code) || "";
+    if (code === "auth/unauthorized-domain")
+      return "Diese Domain ist in Firebase Authentication nicht als autorisierte Domain eingetragen.";
+    if (code === "auth/popup-blocked")
+      return "Das Anmeldefenster wurde blockiert.";
+    if (code === "auth/operation-not-supported-in-this-environment")
+      return "In der installierten App ist kein Anmeldefenster moeglich.";
+    if (code === "auth/network-request-failed")
+      return "Keine Verbindung zu Google — Netz, VPN oder Inhaltsblocker pruefen.";
+    if (code === "auth/operation-not-allowed")
+      return "Google-Anmeldung ist im Firebase-Projekt nicht aktiviert.";
+    if (code === "auth/internal-error")
+      return "Firebase meldet einen internen Fehler — meist eine nicht freigegebene Domain.";
+    return (error && error.message) || "Unbekannter Fehler.";
+  }
+
+  // Der Fehlercode bleibt stehen, nicht nur als fluechtige Einblendung: nach
+  // einer Weiterleitung ist die Einblendung laengst weg, und ohne den Code
+  // laesst sich nicht sagen, WAS zu tun ist.
+  function meldeAuthFehler(error) {
+    if (!error) return;
+    const code = (error && error.code) || "";
+    if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return;
+    state.authFehler = { code: code || "ohne Code", text: authFehlerText(error) };
+    setSync("error", `Anmeldung: ${state.authFehler.code}`);
+    toast("Anmeldung fehlgeschlagen", `${state.authFehler.text} (${state.authFehler.code})`, "error");
+    scheduleRender();
+  }
+
   async function signIn() {
     if (!auth) return toast("Anmeldung nicht verfügbar", "Firebase wurde nicht geladen.", "error");
+    const provider = new window.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    state.authFehler = null;
     try {
-      const provider = new window.firebase.auth.GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
       await auth.signInWithPopup(provider);
       closeOverlay();
       toast("Angemeldet", "Die gemeinsamen Quantus-Daten werden geladen.", "ok");
+      return;
     } catch (error) {
-      if (error.code === "auth/unauthorized-domain") {
-        toast("Domain noch nicht autorisiert", "Füge die Tablet-Domain in Firebase Authentication unter Autorisierte Domains ein.", "error");
-      } else toast("Anmeldung fehlgeschlagen", error.message, "error");
+      // Bewusst abgebrochen — keine Weiterleitung, keine Meldung.
+      if (error && error.code === "auth/popup-closed-by-user") return;
+      if (error && error.code === "auth/cancelled-popup-request") return;
+      if (error && POPUP_FEHLER.has(error.code)) {
+        try {
+          toast("Anmeldung wird geöffnet", "Das Tablet wechselt kurz zu Google und kommt danach zurück.");
+          await auth.signInWithRedirect(provider);
+          return;   // die Seite verlaesst sich selbst; es geht bei
+                    // getRedirectResult weiter
+        } catch (zweiter) {
+          meldeAuthFehler(zweiter);
+          return;
+        }
+      }
+      meldeAuthFehler(error);
     }
   }
 
   async function signOut() {
     if (!auth) return;
+    state.authFehler = null;
     await auth.signOut();
     closeOverlay();
     toast("Abgemeldet", "Lokal bleiben keine neuen Quantus-Daten sichtbar.");
@@ -620,9 +716,16 @@
 
   function loginBanner() {
     if (state.user) return "";
+    // Ein gescheiterter Anmeldeversuch darf nicht mit der Einblendung
+    // verschwinden — nach einer Weiterleitung ist sie ohnehin weg. Der Code
+    // steht hier, weil erst er sagt, was zu tun ist.
+    const fehler = state.authFehler
+      ? `<p class="muted" style="color:var(--danger,#e06c75)">${esc(state.authFehler.text)} <strong>(${esc(state.authFehler.code)})</strong></p>`
+      : "";
     return `<section class="widget span-12" style="min-height:auto;border-color:var(--accent)">
       <div class="widget-head"><span class="widget-icon">↪</span><h2>Mit AI Sync verbinden</h2></div>
       <p class="muted">Melde dich einmal mit demselben Google-Konto wie in Quantus an. Danach verwendet die Tablet-App dieselben Daten wie AI Sync.</p>
+      ${fehler}
       <button class="btn primary" data-action="sign-in">Mit Google anmelden</button>
     </section>`;
   }
@@ -1140,25 +1243,139 @@
     </div>`;
   }
 
-  function budgetData() {
+  /*
+   * BEFUND: expense summierte die rohen Betraege. Eine Ausgabe traegt aber ein
+   * NEGATIVES Vorzeichen (so schreiben Desktop und Handy), also war expense
+   * negativ — und der Saldo income - expense ADDIERTE die Ausgaben. Bei 3000
+   * Einnahmen und 92.50 Ausgaben stand dort 3092.50 statt 2907.50.
+   *
+   * Massgeblich ist ausserdem das VORZEICHEN, nicht das type-Feld: aus dem
+   * CSV-Import und aus aelteren Bestaenden kommen Buchungen ohne type.
+   */
+  function budgetData(ym) {
     const accounts = collection("accounts");
     const tx = collection("transactions").filter((item) => !item.isFuture);
-    const ym = localDateKey().slice(0,7);
-    const month = tx.filter((item) => String(item.date || "").startsWith(ym));
-    const income = month.filter((item) => item.type === "income").reduce((sum,item) => sum + (Number(item.amount)||0),0);
-    const expense = month.filter((item) => item.type === "expense").reduce((sum,item) => sum + (Number(item.amount)||0),0);
+    const monat = ym || (state.budgetMonat || localDateKey().slice(0, 7));
+    const month = tx.filter((item) => String(item.date || "").startsWith(monat));
+    const betrag = (item) => Number(item.amount) || 0;
+    const income = month.filter((item) => betrag(item) > 0).reduce((sum, item) => sum + betrag(item), 0);
+    const expense = month.filter((item) => betrag(item) < 0).reduce((sum, item) => sum + Math.abs(betrag(item)), 0);
     const balance = accounts.reduce((sum,item) => sum + (Number(item.balance)||0),0);
-    return { accounts, tx, month, income, expense, balance, currency: accounts[0] && accounts[0].currency || "CHF" };
+    const kategorien = {};
+    month.filter((item) => betrag(item) < 0).forEach((item) => {
+      const k = item.category || "Sonstiges";
+      kategorien[k] = (kategorien[k] || 0) + Math.abs(betrag(item));
+    });
+    return { accounts, tx, month, monat, income, expense, balance,
+      kategorien: Object.entries(kategorien).sort((a, b) => b[1] - a[1]),
+      currency: accounts[0] && accounts[0].currency || "CHF" };
   }
 
+  var BUDGET_KATEGORIEN = ["Essen", "Transport", "Wohnen", "Einkauf", "Gesundheit",
+    "Freizeit", "Bildung", "Abo", "Sonstiges"];
+
+  function budgetMonatVerschieben(ym, n) {
+    const [j, m] = ym.split("-").map(Number);
+    const d = new Date(j, m - 1 + n, 1);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+  function budgetMonatText(ym) {
+    const [j, m] = ym.split("-").map(Number);
+    return new Date(j, m - 1, 1).toLocaleDateString("de-CH", { month: "long", year: "numeric" });
+  }
+
+  /*
+   * BEFUND: das Budget war auf dem Tablet ausdruecklich "Nur lesen". Erfassen
+   * ging nur am Desktop oder am Handy — auf dem Geraet, das man beim Einkaufen
+   * am ehesten dabei hat, gar nicht.
+   *
+   * Erfasst wird ueber dieselbe Entitaets-Operation wie jede andere Sammlung
+   * und im FORMAT der anderen Geraete: der Betrag traegt sein Vorzeichen,
+   * negativ heisst Ausgabe. Ein positiver Betrag mit type "expense" wuerde auf
+   * Desktop und Handy als Einnahme zaehlen.
+   */
   function renderBudget() {
-    const data = budgetData();
-    const latest = data.tx.sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).slice(0,12);
+    const heuteYm = localDateKey().slice(0, 7);
+    const ym = state.budgetMonat || heuteYm;
+    const data = budgetData(ym);
+    const latest = data.month.slice()
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const maxKat = data.kategorien.length ? data.kategorien[0][1] : 1;
+    const tage = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+    const bisher = ym === heuteYm ? Number(localDateKey().slice(8, 10)) : tage;
+
     return `<div class="view">
-      ${viewHeader("Budget", "Eine sichere Leseansicht deiner bestehenden Quantus-Finanzdaten.", `<span class="badge sand">Nur lesen</span>`)}
+      ${viewHeader("Budget", budgetMonatText(ym),
+        `<button class="btn" data-action="budget-monat" data-n="-1">‹ Vormonat</button>` +
+        (ym === heuteYm ? "" : `<button class="btn" data-action="budget-monat" data-n="0">Aktueller Monat</button>`) +
+        `<button class="btn" data-action="budget-monat" data-n="1">Folgemonat ›</button>`)}
       ${loginBanner()}
-      <div class="budget-metrics"><div class="budget-metric"><small>Kontostand</small><strong>${money(data.balance,data.currency)}</strong></div><div class="budget-metric"><small>Einnahmen im Monat</small><strong style="color:var(--accent)">${money(data.income,data.currency)}</strong></div><div class="budget-metric"><small>Ausgaben im Monat</small><strong style="color:var(--coral)">${money(data.expense,data.currency)}</strong></div><div class="budget-metric"><small>Monatssaldo</small><strong>${money(data.income-data.expense,data.currency)}</strong></div></div>
-      <section class="widget"><div class="widget-head"><span class="widget-icon">₣</span><h2>Letzte Buchungen</h2></div><div class="item-list">${latest.map((item) => `<div class="list-item"><span class="badge ${item.type === "income" ? "accent" : "coral"}">${item.type === "income" ? "+" : "−"}</span><div class="item-main"><div class="item-title">${esc(item.description || item.category || "Buchung")}</div><div class="item-meta">${esc(formatDate(item.date))} · ${esc(item.category || "")}</div></div><strong>${money(item.amount,data.currency)}</strong></div>`).join("") || emptyMini("Keine Budgetdaten vorhanden")}</div></section>
+
+      <div class="budget-metrics">
+        <div class="budget-metric"><small>Kontostand</small><strong>${money(data.balance, data.currency)}</strong></div>
+        <div class="budget-metric"><small>Einnahmen</small><strong style="color:var(--accent)">${money(data.income, data.currency)}</strong></div>
+        <div class="budget-metric"><small>Ausgaben</small><strong style="color:var(--coral)">${money(data.expense, data.currency)}</strong></div>
+        <div class="budget-metric"><small>Saldo</small><strong>${money(data.income - data.expense, data.currency)}</strong></div>
+        <div class="budget-metric"><small>⌀ pro Tag</small><strong>${money(bisher ? data.expense / bisher : 0, data.currency)}</strong></div>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="widget span-5 tall">
+          <div class="widget-head"><span class="widget-icon">＋</span><h2>Erfassen</h2></div>
+          <form data-form="budget-tx" class="budget-form">
+            <div class="chip-row" role="group" aria-label="Art">
+              <button type="button" class="chip on" data-action="budget-typ" data-typ="expense">− Ausgabe</button>
+              <button type="button" class="chip" data-action="budget-typ" data-typ="income">＋ Einnahme</button>
+            </div>
+            <input type="hidden" name="typ" value="expense">
+            <div class="field"><label>Betrag</label>
+              <input name="amount" type="number" step="0.05" min="0" inputmode="decimal" required
+                     placeholder="0.00" class="budget-amount"></div>
+            <div class="field"><label>Kategorie</label>
+              <select name="category">${BUDGET_KATEGORIEN.map((k) => `<option value="${attr(k)}">${esc(k)}</option>`).join("")}</select></div>
+            <div class="field"><label>Notiz</label><input name="description" autocomplete="off"></div>
+            <div class="field"><label>Datum</label>
+              <input name="date" type="date" value="${attr(ym === heuteYm ? localDateKey() : ym + "-01")}"></div>
+            ${data.accounts.length ? `<div class="field"><label>Konto</label>
+              <select name="accountId"><option value="">Ohne Konto</option>${data.accounts.map((k) =>
+                `<option value="${attr(k.id)}">${esc(itemTitle(k, "Konto"))}</option>`).join("")}</select></div>` : ""}
+            <button class="btn primary" type="submit" style="width:100%">Buchung sichern</button>
+          </form>
+        </section>
+
+        <section class="widget span-7 tall">
+          <div class="widget-head"><span class="widget-icon">₣</span><h2>Buchungen</h2>
+            <span class="badge accent">${data.month.length}</span></div>
+          <div class="item-list">${latest.map((item) => {
+            const neg = (Number(item.amount) || 0) < 0;
+            return `<div class="list-item">
+              <span class="badge ${neg ? "coral" : "accent"}">${neg ? "−" : "+"}</span>
+              <div class="item-main"><div class="item-title">${esc(item.description || item.category || "Buchung")}</div>
+                <div class="item-meta">${esc(formatDate(item.date))} · ${esc(item.category || "")}</div></div>
+              <strong>${money(item.amount, data.currency)}</strong>
+              <button class="btn ghost small-btn" data-action="budget-loeschen" data-id="${attr(item.id)}"
+                      aria-label="Buchung löschen">🗑</button>
+            </div>`;
+          }).join("") || emptyMini("Keine Buchungen in diesem Monat.")}</div>
+        </section>
+
+        <section class="widget span-6">
+          <div class="widget-head"><span class="widget-icon">▦</span><h2>Kategorien</h2></div>
+          <div class="item-list">${data.kategorien.map(([k, v]) => `<div class="list-item">
+            <div class="item-main"><div class="item-title">${esc(k)}</div>
+              <div class="budget-bar"><span style="width:${Math.round(v / maxKat * 100)}%"></span></div></div>
+            <strong>${money(v, data.currency)}</strong></div>`).join("") || emptyMini("Keine Ausgaben in diesem Monat.")}</div>
+        </section>
+
+        <section class="widget span-6">
+          <div class="widget-head"><span class="widget-icon">◫</span><h2>Konten</h2></div>
+          <div class="item-list">${data.accounts.map((k) => `<div class="list-item">
+            <div class="item-main"><div class="item-title">${esc(itemTitle(k, "Konto"))}</div>
+              <div class="item-meta">${esc(k.type || "")}</div></div>
+            <strong>${money(k.balance, k.currency || data.currency)}</strong></div>`).join("")
+            || emptyMini("Keine Konten hinterlegt.")}</div>
+        </section>
+      </div>
     </div>`;
   }
 
@@ -1637,7 +1854,14 @@
   }
 
   function openSyncSheet() {
-    sheet("Synchronisation", `<div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Firebase-Pfad</small><strong>${esc(APP_STORE_PATH)}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Vorgemerkt</small><strong>${state.pending.length} Änderung(en)</strong></div></div><p class="muted small">Tablet-Änderungen werden atomar in den aktuellen AI-Sync-Datenstand eingefügt und zusätzlich über die Polaris-Inbox gespiegelt. Dadurch bleiben parallele Änderungen erhalten.</p><div class="sheet-foot"><button class="btn primary" data-action="flush-sync">Jetzt abgleichen</button></div>`);
+    // Der Spiegel nach polaris/inbox ist seit F-23 entfernt — der Text hier
+    // versprach ihn trotzdem weiter. Eine Erklaerung, die nicht mehr stimmt,
+    // ist schlimmer als keine: sie laesst einen an der falschen Stelle suchen.
+    const konto = state.user ? (state.user.email || state.user.displayName || "angemeldet") : "nicht angemeldet";
+    const fehler = state.authFehler
+      ? `<p class="muted small" style="color:var(--danger,#e06c75)">Anmeldung: ${esc(state.authFehler.text)} <strong>(${esc(state.authFehler.code)})</strong></p>`
+      : "";
+    sheet("Synchronisation", `<div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Konto</small><strong>${esc(konto)}</strong></div><div class="detail-block"><small>Firebase-Pfad</small><strong>${esc(APP_STORE_PATH)}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Vorgemerkt</small><strong>${state.pending.length} Änderung(en)</strong></div></div>${fehler}<p class="muted small">Tablet-Änderungen werden als Firebase-Transaktion in den aktuellen AI-Sync-Datenstand eingefügt — derselbe Knoten, den auch AI Sync und das Handy lesen. Dadurch bleiben parallele Änderungen erhalten.</p><div class="sheet-foot">${state.user ? `<button class="btn primary" data-action="flush-sync">Jetzt abgleichen</button>` : `<button class="btn primary" data-action="sign-in">Mit Google anmelden</button>`}</div>`);
   }
 
   // Der Apps-Knopf im Dock fuehrt auf den App-Bildschirm. Vorher oeffnete er
@@ -1746,6 +1970,25 @@
       await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),{ title, description:"", status:"open", source:"tablet-quick-add" }),{silent:true});
       toast(`${COLLECTION_CONFIG[name].label} erstellt`, title, "ok");
       requestAnimationFrame(() => { const next=document.querySelector("[data-quickadd]"); if (next) next.focus(); });
+    } else if (type === "budget-tx") {
+      const roh = Math.abs(Number(data.get("amount")) || 0);
+      if (!roh) { toast("Betrag fehlt", "Bitte einen Betrag eingeben", "warn"); return; }
+      const typ = String(data.get("typ") || "expense");
+      const patch = {
+        // Vorzeichen im Betrag — dasselbe Format wie Desktop und Handy.
+        amount: typ === "income" ? roh : -roh,
+        type: typ,
+        category: String(data.get("category") || "Sonstiges"),
+        description: String(data.get("description") || "").trim(),
+        date: String(data.get("date") || localDateKey()),
+        accountId: String(data.get("accountId") || "") || null,
+        source: "tablet"
+      };
+      await executeOperation(makeOperation("entity", "create", "transactions", Core.makeId("txn"), patch));
+      form.reset();
+      const typFeld = form.querySelector('[name="typ"]');
+      if (typFeld) typFeld.value = "expense";
+      toast("Buchung erfasst", money(patch.amount), "ok");
     } else if (type === "db-goal") {
       const titel = String(data.get("title") || "").trim();
       if (!titel) return;
@@ -1903,6 +2146,36 @@
         patch.lastCompleted = vorhanden ? null : tag;
       }
       await executeOperation(makeOperation("habit","update",null,habit.id,patch),{silent:true}); return;
+    }
+
+    // ── Budget ──
+    if (action === "budget-monat") {
+      const heuteYm = localDateKey().slice(0, 7);
+      const n = Number(button.dataset.n || 0);
+      state.budgetMonat = n === 0 ? null : budgetMonatVerschieben(state.budgetMonat || heuteYm, n);
+      render(); return;
+    }
+    if (action === "budget-typ") {
+      // Nur die Sichtbarkeit umschalten — der Wert reist im versteckten Feld
+      // mit, damit das Formular beim Absenden nicht raten muss.
+      const form = button.closest("form");
+      if (!form) return;
+      form.querySelectorAll('[data-action="budget-typ"]').forEach((b) => {
+        b.classList.toggle("on", b === button);
+      });
+      const feld = form.querySelector('[name="typ"]');
+      if (feld) feld.value = button.dataset.typ || "expense";
+      return;
+    }
+    if (action === "budget-loeschen") {
+      const id = button.dataset.id;
+      const tx = collection("transactions").find((t) => t && t.id === id);
+      if (!tx) return;
+      // Rueckfrage: der Papierkorb liegt einen Daumen neben dem Betrag.
+      if (!window.confirm(`Buchung löschen?\n\n${itemTitle(tx, tx.category || "Buchung")} · ${money(tx.amount)}`)) return;
+      await executeOperation(makeOperation("entity", "delete", "transactions", id, {}));
+      toast("Buchung gelöscht", itemTitle(tx, tx.category || ""), "ok");
+      return;
     }
 
     // ── Daily Briefing ──

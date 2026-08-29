@@ -220,6 +220,23 @@
   font-size: 13px; color: var(--text);
 }
 
+/* ── Budget: Erfassen auf dem Tablet ──────────────────────────────────────
+   Vorher stand hier "Nur lesen" — erfasst wurde nur am Desktop oder am
+   Handy, also gerade nicht auf dem Geraet, das man beim Einkaufen dabei hat. */
+.budget-form { display: flex; flex-direction: column; gap: 12px; }
+.budget-form .chip-row { gap: 8px; }
+.budget-form .chip { min-height: 44px; padding: 0 16px; }
+.budget-form .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.budget-amount { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+.budget-form .field label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.budget-form input, .budget-form select {
+  width: 100%; min-height: 46px; padding: 8px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface2); color: var(--text); font-size: 15px;
+}
+.budget-form .btn.primary { min-height: 50px; font-size: 16px; }
+.budget-bar { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; margin-top: 6px; }
+.budget-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+
 /* ==========================================================================
    ANORDNEN DES HOMEBILDSCHIRMS
    Sichtbarer Modus: die Symbole wackeln, das aufgehobene steht hervor, und

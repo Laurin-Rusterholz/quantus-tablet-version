@@ -177,7 +177,9 @@ und keine Runtime-Abhängigkeiten.
 
 ## Sicherheitsgrenzen
 
-- Budget- und Kontodaten sind in der Tablet-Version nur lesbar.
+- Budgetbuchungen lassen sich auf dem Tablet erfassen und aendern; sie laufen
+  ueber dieselbe Entitaets-Operation wie jede andere Sammlung. Konten selbst
+  bleiben nur lesbar.
 - Passwörter, Tokens und Zahlungsdaten werden nicht über Polaris geändert.
 - Externe AI-Sync-Module öffnen sich auf der konfigurierbaren AI-Sync-Adresse.
 - Der vollständige App-Blob wird nur innerhalb einer atomaren Firebase-
