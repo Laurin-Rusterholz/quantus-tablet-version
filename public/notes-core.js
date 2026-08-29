@@ -302,9 +302,14 @@
     if (isObject(value)) return value;
     if (!Array.isArray(value)) return {};
     const output = {};
-    value.forEach(function (entry, index) {
+    Object.keys(value).forEach(function (key) {
+      const entry = value[key];
       const item = isObject(entry) ? clone(entry) : { legacyValue: clone(entry) };
-      const base = cleanText(item.id) || "legacy_" + prefix + "_" + index;
+      const rawKey = String(key);
+      const keyPart = /^(0|[1-9]\d*)$/.test(rawKey)
+        ? rawKey
+        : (rawKey.replace(/[^A-Za-z0-9_-]+/g,"_").replace(/^_+|_+$/g,"") || "key");
+      const base = cleanText(item.id) || "legacy_" + prefix + "_" + keyPart;
       let id = base, suffix = 2;
       while (Object.prototype.hasOwnProperty.call(output, id)) id = base + "_" + suffix++;
       Object.defineProperty(output, id, { value:{ ...item, id }, enumerable:true, writable:true, configurable:true });
@@ -390,7 +395,7 @@
        Notiz, wodurch keine zweite bearbeitbare Kopie entsteht. */
     Object.keys(payload.entities.ideas).sort().forEach(function (id) {
       const idea = payload.entities.ideas[id];
-      if (!isObject(idea) || idea.status === "deleted" || idea.deletedAt) return;
+      if (!isObject(idea) || idea.deleted || idea.archived || idea.status === "deleted" || idea.deletedAt) return;
       const linked = findIdeaNote(payload.entities.notes, idea, id);
       const content = cleanText(idea.idea || idea.content || idea.description || idea.text || idea.title);
       if (!linked && !content) return;

@@ -77,7 +77,7 @@
   function titleOf(item) { return item && (item.title || item.name || item.subject || item.titel) || "Ohne Titel"; }
   function currentMap(name) { return asMap(api()?.state?.payload?.entities?.[name]); }
   function items(name) {
-    return Object.values(currentMap(name)).filter((item) => item && item.status !== "deleted" && !item.deletedAt)
+    return Object.values(currentMap(name)).filter((item) => item && !item.deleted && !item.archived && item.status !== "deleted" && !item.deletedAt)
       .sort((a, b) => titleOf(a).localeCompare(titleOf(b), "de"));
   }
   function currentEntity() { return currentMap(ui.collection)[ui.entityId] || null; }

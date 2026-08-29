@@ -333,7 +333,7 @@
   function asArray(value) { return Array.isArray(value) ? value : []; }
   function asMap(value) { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
   function values(map) { return Object.values(asMap(map)).filter(Boolean); }
-  function isDeleted(item) { return item && (item.status === "deleted" || item.deletedAt); }
+  function isDeleted(item) { return item && (item.deleted || item.archived || item.status === "deleted" || item.deletedAt); }
   function isDone(item) { return item && ["done", "completed", "erledigt", "closed"].includes(item.status); }
   function itemTitle(item, fallback) { return item && (item.title || item.name || item.subject || item.titel) || fallback || "Ohne Titel"; }
   function itemText(item) { return item && (item.description || item.content || item.text || item.notes || item.notiz || "") || ""; }
@@ -416,12 +416,13 @@
 
   // Loeschen ist auf dem Tablet nie endgueltig: Der Hinweis bietet acht Sekunden
   // lang eine Ein-Klick-Wiederherstellung an.
-  function undoToast(collectionName, id) {
+  const deleteUndo = new Map();
+  function undoToast(collectionName, id, undoToken) {
     const node = document.createElement("div");
     node.className = "toast";
-    node.innerHTML = `<strong>Eintrag ausgeblendet</strong><span>Aus Versehen? Einfach zurückholen.</span><button class="btn small-btn" data-action="undo-delete" data-collection="${attr(collectionName)}" data-id="${attr(id)}">Rückgängig</button>`;
+    node.innerHTML = `<strong>Eintrag ausgeblendet</strong><span>Aus Versehen? Einfach zurückholen.</span><button class="btn small-btn" data-action="undo-delete" data-collection="${attr(collectionName)}" data-id="${attr(id)}" data-undo-token="${attr(undoToken || "")}">Rückgängig</button>`;
     document.getElementById("toasts").appendChild(node);
-    setTimeout(() => node.remove(), 8000);
+    setTimeout(() => { node.remove(); if (undoToken) deleteUndo.delete(undoToken); }, 8000);
   }
 
   function setSync(status, message) {
@@ -663,6 +664,53 @@
       id: id || Core.makeId(kind),
       patch: patch || {},
       updatedAt: new Date().toISOString()
+    };
+  }
+
+  function makeEntityBatch(operations) {
+    return makeOperation("entity-batch", "update", null, Core.makeId("batch"), { operations });
+  }
+
+  function ideaAggregate(collectionName, id) {
+    const notes = asMap(state.payload.entities.notes);
+    const ideas = asMap(state.payload.entities.ideas);
+    let note = collectionName === "notes" ? notes[id] : null;
+    let idea = collectionName === "ideas" ? ideas[id] : null;
+    const noteIdentity = (entry) => {
+      if (!entry) return "";
+      const source = sourceOf(entry);
+      const dedupe = String(entry.dedupeKey || "");
+      return source.app === "ideas" && source.entityId ? String(source.entityId)
+        : (/^ideas?:/.test(dedupe) ? dedupe.replace(/^ideas?:/,"") : "");
+    };
+    if (note && (note.noteClass === "idea" || noteIdentity(note))) {
+      const identity = noteIdentity(note);
+      idea = Object.values(ideas).find((candidate) => candidate && !isDeleted(candidate) && (
+        candidate.noteId === note.id || candidate.centralNoteId === note.id
+        || (identity && String(candidate.id) === identity)
+      )) || null;
+    } else if (idea) {
+      const refs = [idea.noteId, idea.centralNoteId].filter(Boolean);
+      note = refs.map((noteId) => notes[noteId]).find(Boolean)
+        || Object.values(notes).find((candidate) => candidate && !isDeleted(candidate) && noteIdentity(candidate) === String(idea.id)) || null;
+    }
+    if (!note || (note.noteClass !== "idea" && !noteIdentity(note))) return [];
+    const targets = [{ collection:"notes", id:note.id, item:note }];
+    Object.values(ideas).forEach((candidate) => {
+      if (!candidate || isDeleted(candidate)) return;
+      if (candidate === idea || candidate.noteId === note.id || candidate.centralNoteId === note.id
+        || (noteIdentity(note) && String(candidate.id) === noteIdentity(note))) {
+        targets.push({ collection:"ideas", id:candidate.id, item:candidate });
+      }
+    });
+    return targets;
+  }
+
+  function restorePatch(item) {
+    return {
+      deleted:Boolean(item && item.deleted), archived:Boolean(item && item.archived),
+      status:item && item.status && item.status !== "deleted" ? item.status : "open",
+      deletedAt:item && item.deletedAt || null
     };
   }
 
@@ -2554,14 +2602,22 @@
     if (action === "delete-entity") {
       if (!confirm("Diesen Eintrag ausblenden? Er wird als gelöscht markiert und kann nicht versehentlich andere Quantus-Daten entfernen.")) return;
       const deletedCollection = button.dataset.collection, deletedId = button.dataset.id;
-      await executeOperation(makeOperation("entity","delete",deletedCollection,deletedId,{}),{silent:true});
-      undoToast(deletedCollection, deletedId);
+      const aggregate = ideaAggregate(deletedCollection, deletedId);
+      const targets = aggregate.length ? aggregate : [{ collection:deletedCollection, id:deletedId, item:asMap(state.payload.entities[deletedCollection])[deletedId] }];
+      const undoToken = Core.makeId("undo");
+      deleteUndo.set(undoToken, targets.map((target) => ({ collection:target.collection, id:target.id, patch:restorePatch(target.item) })));
+      const operations = targets.map((target) => ({ collection:target.collection, id:target.id, action:"delete", patch:{} }));
+      await executeOperation(operations.length > 1 ? makeEntityBatch(operations) : makeOperation("entity","delete",deletedCollection,deletedId,{}),{silent:true});
+      undoToast(deletedCollection, deletedId, undoToken);
       return;
     }
     if (action === "undo-delete") {
       const toastNode = button.closest(".toast");
       if (toastNode) toastNode.remove();
-      await executeOperation(makeOperation("entity","update",button.dataset.collection,button.dataset.id,{ status:"open", deletedAt:null }),{silent:true});
+      const undo = deleteUndo.get(button.dataset.undoToken) || [{ collection:button.dataset.collection, id:button.dataset.id, patch:{ deleted:false, archived:false, status:"open", deletedAt:null } }];
+      deleteUndo.delete(button.dataset.undoToken);
+      const operations = undo.map((target) => ({ collection:target.collection, id:target.id, action:"update", patch:target.patch }));
+      await executeOperation(operations.length > 1 ? makeEntityBatch(operations) : makeOperation("entity","update",operations[0].collection,operations[0].id,operations[0].patch),{silent:true});
       toast("Wiederhergestellt", "Der Eintrag ist zurück.", "ok");
       return;
     }

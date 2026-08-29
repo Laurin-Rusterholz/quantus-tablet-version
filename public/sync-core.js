@@ -186,10 +186,29 @@
       updatedAt: operation.updatedAt
     };
     if (operation.action === "delete") {
+      map[operation.id].deleted = true;
       map[operation.id].status = "deleted";
       map[operation.id].deletedAt = operation.updatedAt;
     }
     return { applied: true, reason: "entity-updated" };
+  }
+
+  function applyEntityBatchOperation(payload, operation) {
+    const operations = operation && operation.patch && operation.patch.operations;
+    if (!Array.isArray(operations) || !operations.length) return { applied:false, reason:"invalid-entity-batch" };
+    const staged = clone(payload);
+    for (const child of operations) {
+      if (!isObject(child) || !child.collection || !child.id || !["create","update","delete"].includes(child.action)) {
+        return { applied:false, reason:"invalid-entity-batch-child" };
+      }
+      const result = applyEntityOperation(staged, {
+        kind:"entity", action:child.action, collection:child.collection, id:child.id,
+        patch:isObject(child.patch) ? child.patch : {}, updatedAt:operation.updatedAt
+      });
+      if (!result.applied) return { applied:false, reason:result.reason || "entity-batch-conflict" };
+    }
+    payload.entities = staged.entities;
+    return { applied:true, reason:"entity-batch-updated" };
   }
 
   function applyHabitOperation(payload, operation) {
@@ -375,6 +394,7 @@
     let result;
     if (!operation || !operation.kind) result = { applied: false, reason: "invalid-operation" };
     else if (operation.kind === "entity") result = applyEntityOperation(payload, operation);
+    else if (operation.kind === "entity-batch") result = applyEntityBatchOperation(payload, operation);
     else if (operation.kind === "habit") result = applyHabitOperation(payload, operation);
     else if (operation.kind === "briefing") result = applyBriefingOperation(payload, operation);
     else if (operation.kind === "flashcard") result = applyFlashcardOperation(payload, operation);
@@ -421,8 +441,12 @@
   function isValidOperation(operation) {
     if (!isObject(operation)) return false;
     if (!operation.id || typeof operation.id !== "string") return false;
-    if (!["entity", "habit", "briefing", "flashcard", "flowertech", "list", "timer"].includes(operation.kind)) return false;
+    if (!["entity", "entity-batch", "habit", "briefing", "flashcard", "flowertech", "list", "timer"].includes(operation.kind)) return false;
     if (operation.kind === "entity" && (!operation.collection || typeof operation.collection !== "string")) return false;
+    if (operation.kind === "entity-batch" && (!operation.patch || !Array.isArray(operation.patch.operations)
+      || !operation.patch.operations.length || operation.patch.operations.some((child) => !isObject(child)
+        || typeof child.collection !== "string" || typeof child.id !== "string"
+        || !["create","update","delete"].includes(child.action)))) return false;
     if (operation.kind === "flowertech" && !["offers", "invoices"].includes(operation.collection)) return false;
     // Eine Listenoperation darf nur in einen der bekannten Bereiche schreiben.
     // Ein freier Pfad waere ein Schreibrecht auf den ganzen Datenstand.
@@ -465,14 +489,14 @@
      */
     const keepInOrder = [];
     const seen = new Set();
-    all.filter((operation) => operation.kind === "briefing").forEach((operation) => {
+    all.filter((operation) => operation.kind === "briefing" || operation.kind === "entity-batch").forEach((operation) => {
       const key = operation.operationId || `${operation.kind}::${operation.action}::${operation.id}`;
       if (seen.has(key)) return;
       seen.add(key);
       keepInOrder.push(clone(operation));
     });
 
-    const list = all.filter((operation) => operation.kind !== "briefing");
+    const list = all.filter((operation) => operation.kind !== "briefing" && operation.kind !== "entity-batch");
     const groups = new Map();
     list.forEach((operation) => {
       const key = [operation.kind, operation.collection || "", operation.id].join("::");
@@ -611,7 +635,7 @@
     let totalEntities = 0;
     Object.keys(normalised.entities).forEach((name) => {
       const active = Object.values(normalised.entities[name]).filter((item) =>
-        isObject(item) && item.status !== "deleted" && !item.deletedAt).length;
+        isObject(item) && !item.deleted && !item.archived && item.status !== "deleted" && !item.deletedAt).length;
       if (active) perCollection[name] = active;
       totalEntities += active;
     });

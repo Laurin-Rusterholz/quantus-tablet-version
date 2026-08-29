@@ -168,6 +168,35 @@ assert.equal(arrayLegacy.entities.books.legacy_book_0.title, "Nur Titel");
 assert.equal(arrayLegacy.entities.books.legacy_book_0.annotations[0].id, "a1");
 assert.equal(arrayLegacy.entities.ideas["array-idea"].centralNoteId, "idea-note-array-idea");
 
+// Exakt dieselbe lossless Array-Konvention wie Mobile/Desktop: sparse und
+// string-keyed Einträge bleiben erhalten, reservierte IDs polluieren nichts.
+const richArrayNotes = [];
+richArrayNotes[4] = { description:"Sparse" };
+richArrayNotes["custom tag"] = { description:"String key" };
+richArrayNotes.push({ id:"__proto__", description:"Reserved" });
+const richArrays = { entities:{
+  notes:richArrayNotes,
+  notebooks:[{ id:"__proto__", title:"Reserved notebook" }],
+  books:[{ id:"__proto__", title:"Reserved book" }],
+  ideas:[{ id:"__proto__", text:"Reserved idea", category:"System" }]
+} };
+Notes.migratePayload(richArrays);
+assert.equal(richArrays.entities.notes.legacy_note_4.content, "Sparse");
+assert.equal(richArrays.entities.notes.legacy_note_custom_tag.content, "String key");
+for (const name of ["notes","notebooks","books","ideas"]) {
+  assert.equal(Object.prototype.hasOwnProperty.call(richArrays.entities[name], "__proto__"), true, `${name}: reserved id`);
+}
+assert.equal(Object.getPrototypeOf(richArrays.entities.notes), Object.prototype);
+const richOnce = JSON.stringify(richArrays);
+assert.equal(JSON.stringify(Notes.migratePayload(richArrays)), richOnce);
+
+const deletedIdeas = Notes.migratePayload({ entities:{ notes:{}, notebooks:{}, books:{}, ideas:{
+  mobile:{ id:"mobile", text:"weg", deleted:true },
+  archived:{ id:"archived", text:"weg", archived:true },
+  tablet:{ id:"tablet", text:"weg", status:"deleted", deletedAt:"2026-08-29T10:00:00.000Z" }
+} } });
+assert.deepEqual(Object.keys(deletedIdeas.entities.notes), [], "Tombstone-Ideas dürfen nicht wiederbelebt werden");
+
 // Quellenlose Legacy-Notizen rekonstruieren ihre fachliche App und IDs aus
 // den alten Feldern; sie duerfen nicht pauschal als Noteflow-Quelle enden.
 const legacySources = Notes.migratePayload({ entities:{ notes:{
@@ -201,6 +230,9 @@ assert.equal(newsroomFixture.entities.notes.n1.source.route, "#/articles/outputs
 assert.equal(newsroomFixture.entities.nhOut.pub1.topicLabel, "Politik");
 assert.deepEqual(Notes.sourceEntityCollections(newsroomFixture.entities.notes.n1.source), ["nhOut", "articles"]);
 assert.match(app, /sourceEntityCollections\(source\)/);
+assert.match(app, /item\.deleted \|\| item\.archived \|\| item\.status === "deleted" \|\| item\.deletedAt/);
+assert.match(app, /function ideaAggregate\(/);
+assert.match(app, /makeEntityBatch\(operations\)/);
 assert.match(nativeModules, /col\("nhOut"\)/);
 
 for (const [legacyStatus, canonical] of Object.entries({
