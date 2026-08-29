@@ -208,6 +208,7 @@
       '<div class="mail-detail-head"><div class="row-actions">' +
       '<button class="btn small-btn" data-action="mail-reply" data-id="' + esc(item.id) + '">↩ Antworten</button>' +
       '<button class="btn small-btn" data-action="mail-forward" data-id="' + esc(item.id) + '">↪ Weiterleiten</button>' +
+      '<button class="btn small-btn" data-action="mail-note" data-id="' + esc(item.id) + '">＋✎ Als Notiz</button>' +
       '<button class="btn small-btn" data-action="mail-toggle-read" data-id="' + esc(item.id) + '">' +
         (item.unread ? "Als gelesen" : "Als ungelesen") + "</button>" +
       '<button class="btn small-btn" data-action="mail-archive" data-id="' + esc(item.id) + '">▣ Archiv</button>' +
@@ -417,6 +418,32 @@
     }
 
     if (action === "mail-compose") { composeSheet({}); return true; }
+
+    if (action === "mail-note") {
+      var noteItem = ui.list.find(function (entry) { return entry.id === button.dataset.id; });
+      var noteApi = api();
+      if (!noteItem || !noteApi || typeof noteApi.openNoteForm !== "function") return true;
+      var noteBody = ui.body && ui.body.id === noteItem.id
+        ? (ui.body.text || htmlToText(ui.body.html))
+        : (noteItem.snippet || "");
+      // Bewusste Vorschau vor dem Speichern: Mail-Inhalte werden nie automatisch
+      // in Noteflow kopiert. Der Nutzer kann den Text hier kuerzen oder verwerfen.
+      noteApi.openNoteForm({
+        noteClass: "research",
+        lockClass: true,
+        title: noteItem.subject || "E-Mail-Notiz",
+        content: noteBody,
+        tags: ["Mail"],
+        source: {
+          app: "mail",
+          entityType: "email",
+          entityId: noteItem.id,
+          label: noteItem.subject || noteItem.fromName || "E-Mail",
+          route: "#/mail"
+        }
+      });
+      return true;
+    }
 
     if (action === "mail-reply" || action === "mail-forward") {
       var item = ui.list.find(function (entry) { return entry.id === button.dataset.id; });

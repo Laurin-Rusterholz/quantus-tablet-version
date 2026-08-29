@@ -143,6 +143,35 @@
     return a ? a.Core.makeId(prefix) : prefix + "_" + Math.random().toString(36).slice(2);
   }
 
+  function noteButton(config) {
+    var c = config || {};
+    return '<button class="' + attr(c.buttonClass || "btn small-btn") + '" data-action="nm-context-note"' +
+      ' data-note-class="' + attr(c.noteClass || "research") + '" data-app="' + attr(c.app || "knowledge") +
+      '" data-entity-type="' + attr(c.entityType || "item") + '" data-id="' + attr(c.id || "") +
+      '" data-label="' + attr(c.label || "Kontext") + '" data-tag="' + attr(c.tag || c.label || "Kontext") +
+      '" data-route="' + attr(c.route || "#/") + '" data-content="' + attr(c.content || "") + '">' +
+      esc(c.text || "＋ Notiz") + "</button>";
+  }
+
+  function openContextualNote(button) {
+    var a = api(); if (!a || typeof a.openNoteForm !== "function") return;
+    var label = button.dataset.label || "Kontext";
+    a.openNoteForm({
+      noteClass: button.dataset.noteClass || "research",
+      lockClass: true,
+      title: (button.dataset.noteClass === "learning" ? "Lernnotiz · " : "Notiz · ") + label,
+      content: button.dataset.content || "",
+      tags: [button.dataset.tag || label],
+      source: {
+        app: button.dataset.app || "knowledge",
+        entityType: button.dataset.entityType || "item",
+        entityId: button.dataset.id || null,
+        label: label,
+        route: button.dataset.route || null
+      }
+    });
+  }
+
   // =========================================================================
   //  ZEITERFASSUNG
   // =========================================================================
@@ -439,7 +468,8 @@
               esc(fmtTime(event.start || event.startAt || event.time) || "Ganztags") + "</span>" +
               '<div class="item-main"><div class="item-title">' + esc(title(event, "Termin")) + "</div>" +
               '<div class="item-meta">' + esc(event.location || event.place || event.description || (google ? "Google Kalender" : "Quantus")) +
-              "</div></div></div>";
+              "</div></div>" + noteButton({ buttonClass:"icon-action", text:"＋✎", app:"googlecalendar", entityType:"event", id:event.id,
+                label:title(event,"Termin"), tag:title(event,"Termin"), route:"#/googlecalendar", content:event.description || "" }) + "</div>";
           }).join("") + "</div>");
       }).join("") : nothing("31", "Keine kommenden Termine", "Synchronisiere den Google-Kalender in AI Sync oder lege hier ein Meeting an.")) +
       "</div></div>";
@@ -452,7 +482,15 @@
     var route = "knowledge";
     var kind = tab(route, "all");
     var notes = col("notes").map(function (item) { return { kind: "notes", item: item }; });
-    var articles = col("articles").map(function (item) { return { kind: "articles", item: item }; });
+    var articleMap = Object.create(null);
+    col("articles").forEach(function (item) { articleMap[item.id] = { kind:"articles", entityType:"article", item:item }; });
+    col("nhOut").forEach(function (item) {
+      // Fertige Newsroom-Ausgaben liegen geraeteuebergreifend in nhOut. Falls
+      // dieselbe ID auch als Artikel existiert, gewinnt die Publication mit
+      // ihrem stabilen Backlink statt doppelt in der Liste zu erscheinen.
+      articleMap[item.id] = { kind:"articles", entityType:"publication", item:item };
+    });
+    var articles = Object.keys(articleMap).map(function (id) { return articleMap[id]; });
     var concepts = col("concepts").map(function (item) { return { kind: "concepts", item: item }; });
     var all = notes.concat(articles).concat(concepts);
     var list = all.filter(function (entry) {
@@ -464,7 +502,7 @@
     return '<div class="view">' +
       head("Wissensbasis", "Notizen, Artikel und Konzepte deines Quantus-Wissens an einem Ort — durchsuchbar.",
         '<button class="btn" data-action="go" data-route="notes">✎ Noteflow</button>' +
-        '<button class="btn primary" data-action="new-entity" data-collection="notes">＋ Notiz</button>') +
+        noteButton({ buttonClass:"btn primary", app:"knowledge", entityType:"knowledge-base", id:null, label:"Wissensbasis", tag:"Wissensbasis", route:"#/knowledge", text:"＋ Recherchenotiz" })) +
       banner() +
       '<div class="filterbar">' + searchField(route, "Wissen durchsuchen") +
         chips(route, [
@@ -479,6 +517,7 @@
           esc(labels[entry.kind]) + "</span></div><h3>" + esc(title(entry.item, labels[entry.kind])) + "</h3><p>" +
           esc(text(entry.item).slice(0, 220) || "Kein Text hinterlegt") + '</p><div class="card-foot"><span class="muted small">' +
           esc(fmtDate(entry.item.updatedAt || entry.item.createdAt)) + '</span><span class="spacer"></span>' +
+          (entry.kind !== "notes" ? noteButton({ buttonClass:"icon-action", text:"＋✎", app:entry.kind === "articles" ? "articles" : "concepts", entityType:entry.kind === "articles" ? (entry.entityType || "article") : "concept", id:entry.item.id, label:title(entry.item, labels[entry.kind]), tag:entry.kind === "articles" ? (entry.item.topicLabel || entry.item.topic || entry.item.theme || entry.item.thema || title(entry.item, labels[entry.kind])) : title(entry.item, labels[entry.kind]), route:entry.kind === "articles" ? "#/knowledge" : "#/concepts", content:text(entry.item).slice(0, 500) }) : "") +
           (editable ? '<button class="icon-action" data-action="edit-entity" data-collection="' + attr(entry.kind) +
             '" data-id="' + attr(entry.item.id) + '" aria-label="Bearbeiten">✎</button>' : "") +
           '<button class="icon-action" data-action="nm-to-card" data-front="' + attr(title(entry.item, "")) +
@@ -513,6 +552,7 @@
         '<section class="reader-panel">' + (open
           ? '<form class="nm-editor" data-form="nm-thesis" data-id="' + attr(open.id) + '">' +
             '<div class="panel-head"><strong class="truncate">' + esc(title(open, "These")) + "</strong>" +
+            noteButton({ app:"thesis", entityType:"thesis", id:open.id, label:title(open,"These"), tag:title(open,"These"), route:"#/thesis", content:(open.question || open.description || "").slice(0,500), text:"＋ Recherchenotiz" }) +
             '<button class="icon-action" type="button" data-action="nm-thesis-delete" data-id="' + attr(open.id) + '" aria-label="Loeschen">⌫</button>' +
             '<button class="btn primary small-btn" type="submit">Sichern</button></div>' +
             '<div class="nm-editor-body">' +
@@ -574,6 +614,7 @@
         '<div class="item-list">' + (topics.length ? topics.slice().reverse().map(function (topic) {
           return '<div class="list-item"><span>✦</span><div class="item-main"><div class="item-title">' +
             esc(topic.text || "") + '</div><div class="item-meta">' + esc(fmtDate(topic.createdAt)) + "</div></div>" +
+            noteButton({ buttonClass:"icon-action", text:"＋✎", noteClass:"learning", app:"journal", entityType:"thought", id:topic.id, label:"Journal-Gedanke", tag:"Journal", route:"#/journal", content:topic.text || "" }) +
             '<button class="icon-action" data-action="nm-list-delete" data-area="journal.topics" data-id="' +
               attr(topic.id) + '" aria-label="Loeschen">⌫</button></div>';
         }).join("") : nothingSmall("Noch keine Gedanken festgehalten")) + "</div>");
@@ -600,6 +641,7 @@
         '<section class="reader-panel">' + (open
           ? '<form class="nm-editor" data-form="nm-journal-doc" data-id="' + attr(open.id) + '">' +
             '<div class="panel-head"><strong class="truncate">' + esc(open.title || "Eintrag") + "</strong>" +
+            noteButton({ noteClass:"learning", app:"journal", entityType:"entry", id:open.id, label:open.title || "Journal-Eintrag", tag:"Journal", route:"#/journal", content:nurText(open.content).slice(0,600), text:"Erkenntnis übernehmen" }) +
             '<button class="icon-action" type="button" data-action="nm-list-delete" data-area="journal.documents" data-id="' +
               attr(open.id) + '" aria-label="Loeschen">⌫</button>' +
             '<button class="btn primary small-btn" type="submit">Sichern</button></div>' +
@@ -700,6 +742,7 @@
                 '<span class="badge accent">' + esc(avg(entry) || "—") + "</span>" +
                 '<div class="item-main"><div class="item-title">' + esc(fmtDate(entry.date)) + "</div>" +
                 '<div class="item-meta">' + esc(String(obj(entry.openQuestions).a || "").slice(0, 90) || "Ohne Notiz") + "</div></div>" +
+                noteButton({ buttonClass:"icon-action", text:"＋✎", noteClass:"learning", app:"reflecta", entityType:"reflection", id:entry.id, label:"Reflexion " + fmtDate(entry.date), tag:"Reflecta", route:"#/reflecta", content:arr(entry.learnings).join("\n") || String(obj(entry.openQuestions).c || "") }) +
                 '<button class="icon-action" data-action="nm-list-delete" data-area="reflections" data-id="' +
                   attr(entry.id) + '" aria-label="Loeschen">⌫</button></div>';
             }).join("") + "</div>"
@@ -753,6 +796,7 @@
           (Number(item.priority) === 1 ? '<span class="badge coral">Hoch</span>' : "") + "</div>" +
           "<h3>" + esc(title(item, "Nachricht")) + "</h3><p>" + esc(String(item.content || "").slice(0, 240)) + "</p>" +
           '<div class="card-foot"><span class="spacer"></span>' +
+          noteButton({ noteClass:"research", app:"messages", entityType:"message", id:item.id, label:title(item,"Nachricht"), tag:"Mitteilung", route:"#/messages", content:String(item.content || "").slice(0,500), text:"Als Notiz speichern" }) +
           (item.isRead
             ? '<button class="btn small-btn" data-action="nm-message-unread" data-id="' + attr(item.id) + '">Wieder offen</button>'
             : '<button class="btn small-btn" data-action="nm-message-read" data-id="' + attr(item.id) + '">Gelesen</button>') +
@@ -812,6 +856,7 @@
           '<div class="item-meta">' + esc(item.category || "Allgemein") +
           (item.priority && item.priority !== "normal" ? " · " + esc(item.priority) : "") + " · " +
           esc(fmtDate(item.createdAt)) + "</div></div>" +
+          noteButton({ buttonClass:"icon-action", text:"＋✎", app:"updates", entityType:"update", id:item.id, label:item.category || "Update", tag:item.category || "Update", route:"#/updates", content:item.text || "" }) +
           '<button class="icon-action" data-action="delete-entity" data-collection="updates" data-id="' +
             attr(item.id) + '" aria-label="Loeschen">⌫</button></div>';
       }).join("") : nothingSmall("Nichts offen")) +
@@ -845,6 +890,7 @@
       '<div class="dashboard-grid">' + (decisions.length ? decisions.map(function (decision) {
         var own = measures.filter(function (task) { return task.decisionId === decision.id; });
         return widget(6, "⚖", title(decision, "Entscheidung"),
+          noteButton({ app:"decisions", entityType:"decision", id:decision.id, label:title(decision,"Entscheidung"), tag:title(decision,"Entscheidung"), route:"#/decisions", content:text(decision).slice(0,500), text:"＋ Notiz" }) +
           '<p class="muted small">' + esc(text(decision).slice(0, 180) || "Keine Begruendung hinterlegt") + "</p>" +
           '<div class="item-list">' + (own.length ? own.map(function (task) {
             var isDone = a && a.isDone(task);
@@ -908,6 +954,7 @@
           "<h3>" + esc(docName(doc)) + "</h3><p>" + esc(String(doc.textauszug || doc.text || "").slice(0, 180) || "Kein Textauszug") + "</p>" +
           '<div class="card-foot"><span class="muted small">' + esc(fmtDate(doc.aktualisiert || doc.erstellt)) +
           '</span><span class="spacer"></span>' +
+          noteButton({ app:"drive", entityType:"document", id:doc.id, label:docName(doc), tag:doc.bereich || docName(doc), route:"#/drive", content:String(doc.textauszug || doc.text || "").slice(0,500), text:"Recherchenotiz" }) +
           '<button class="btn small-btn" data-action="open-doc" data-id="' + attr(doc.id) + '">Lesen</button>' +
           (doc.downloadUrl || doc.fileUrl
             ? '<button class="icon-action" data-action="external-url" data-url="' + attr(doc.downloadUrl || doc.fileUrl) +
@@ -938,7 +985,8 @@
           }).join("") : nothingSmall("Keine PDFs im Drive")) + "</div></aside>" +
         '<section class="reader-panel">' + (open && url
           ? '<div class="panel-head"><button class="icon-action" data-action="reader-wide" title="Liste ein-/ausblenden">◫</button>' +
-            '<strong class="truncate">' + esc(docName(open)) + "</strong></div>" +
+            '<strong class="truncate">' + esc(docName(open)) + "</strong>" +
+            noteButton({ app:"pdfeditor", entityType:"pdf", id:open.id, label:docName(open), tag:open.bereich || docName(open), route:"#/pdfeditor", text:"＋ Recherchenotiz" }) + "</div>" +
             // Der Betrachter wird nach dem Zeichnen eingehaengt (mount). Er
             // rendert die Seiten selbst — das iframe von frueher zeigte auf
             // iPadOS nur die erste Seite und kannte keine Bedienung.
@@ -987,6 +1035,7 @@
         '<section class="reader-panel">' + (open
           ? '<form class="nm-editor" data-form="nm-doc" data-id="' + attr(open.id) + '">' +
             '<div class="panel-head"><strong class="truncate">' + esc(open.title || "Dokument") + "</strong>" +
+            noteButton({ app:"docstudio", entityType:"document", id:open.id, label:open.title || "Dokument", tag:"DocStudio", route:"#/docstudio", content:String(open.content || "").slice(0,600), text:"＋ Recherchenotiz" }) +
             '<button class="icon-action" type="button" data-action="nm-doc-print" data-id="' + attr(open.id) + '" aria-label="Drucken">⎙</button>' +
             '<button class="icon-action" type="button" data-action="nm-list-delete" data-area="journal.documents" data-id="' +
               attr(open.id) + '" aria-label="Loeschen">⌫</button>' +
@@ -1038,6 +1087,7 @@
           '<div class="item-list">' + (list.length ? list.slice(0, 30).map(function (entry) {
             return '<div class="list-item"><span>🔗</span><div class="item-main"><div class="item-title">' +
               esc(entry.title || entry.url) + '</div><div class="item-meta truncate">' + esc(entry.url) + "</div></div>" +
+              noteButton({ buttonClass:"icon-action", text:"＋✎", app:"browser", entityType:"link", id:entry.id, label:entry.title || entry.url, tag:entry.title || "Browser", route:"#/browser", content:entry.url }) +
               '<button class="icon-action" data-action="external-url" data-url="' + attr(entry.url) + '" aria-label="Oeffnen">↗</button>' +
               '<button class="icon-action" data-action="nm-list-delete" data-area="readingList" data-id="' + attr(entry.id) +
               '" aria-label="Entfernen">⌫</button></div>';
@@ -1089,6 +1139,7 @@
               '<div class="item-title' + (goal.completed ? " nm-struck" : "") + '">' + esc(goal.title || "") + "</div></div></div>";
           }).join("") + "</div>" : "") +
           (note ? '<p class="muted small">' + esc(note.slice(0, 160)) + "</p>" : "") +
+          noteButton({ noteClass:"learning", app:"briefings", entityType:"day", id:key, label:"Briefing " + fmtDate(key), tag:"Daily Briefing", route:"#/briefings", content:note, text:"Erkenntnis übernehmen" }) +
           '<button class="btn small-btn" data-action="nm-briefing-open" data-tag="' + attr(key) + '">Tag oeffnen ›</button>');
       }).join("") : nothing("B", "Noch kein Archiv", "Sobald du Tagesziele oder eine Tagesnotiz erfasst, erscheint der Tag hier.")) +
       "</div></div>";
@@ -1112,6 +1163,7 @@
 
     return '<div class="view">' +
       head("Quantus Projekt", "Die Weiterentwicklung von Quantus selbst: offene Arbeiten, Ideen und das Logbuch.",
+        noteButton({ app:"quantusproject", entityType:"project-hub", id:"quantus", label:"Quantus Projekt", tag:"Quantus", route:"#/quantusproject", text:"＋ Notiz" }) +
         '<button class="btn" data-action="go" data-route="updates">↥ Updates</button>' +
         '<button class="btn primary" data-action="new-entity" data-collection="ideas">＋ Idee</button>') +
       banner() +
@@ -1255,6 +1307,7 @@
 
     return '<div class="view">' +
       head("Smarter", "Lernstoff lesen, die Fragen selbst beantworten, dann die Musterantwort aufdecken.",
+        (open ? noteButton({ noteClass:"learning", app:"smarter", entityType:"lesson", id:openKey, label:smarterTitel(open,openKey), tag:smarterTitel(open,openKey), route:"#/smarter", content:nurText(open.theoryHtml || open.documentHtml || "").slice(0,600), text:"＋ Lernnotiz" }) : "") +
         (open ? '<button class="btn" data-action="nm-smarter-done" data-id="' + attr(openKey) + '">' +
           (erledigt ? "↺ Wieder offen" : "✓ Erledigt") + "</button>" : "") +
         '<button class="btn" data-action="go" data-route="learning">▣ Recall Lab</button>') +
@@ -1294,7 +1347,8 @@
                         '<p class="nm-answer" hidden>' + esc(frage.antwort) + "</p>"
                       : '<small class="muted">Zu dieser Frage gibt es keine Musterantwort.</small>') +
                     '<button class="btn small-btn" data-action="nm-to-card" data-front="' + attr(frage.frage) +
-                      '" data-back="' + attr(frage.antwort) + '">▣ Als Karteikarte</button></div>';
+                      '" data-back="' + attr(frage.antwort) + '">▣ Als Karteikarte</button>' +
+                    noteButton({ noteClass:"learning", app:"smarter", entityType:"question", id:openKey + ":" + frage.id, label:smarterTitel(open,openKey) + " · Frage " + (index + 1), tag:smarterTitel(open,openKey), route:"#/smarter", content:(frage.frage || "") + "\n\n" + (frage.antwort || ""), text:"＋ Lernnotiz" }) + "</div>";
                 }).join("")
               : "") +
             "</article></div>"
@@ -1375,6 +1429,7 @@
 
     if (action === "nm-tab") { ui.tab[button.dataset.route] = button.dataset.tab; a.render(); return true; }
     if (action === "nm-open") { ui.open[button.dataset.route] = button.dataset.id; a.render(); return true; }
+    if (action === "nm-context-note") { openContextualNote(button); return true; }
     if (action === "nm-week") {
       var step = Number(button.dataset.step);
       ui.weekOffset = step === 0 ? 0 : ui.weekOffset + step;

@@ -164,7 +164,7 @@
         <svg class="tw-connections" viewBox="0 0 1600 1000" preserveAspectRatio="none"><defs><marker id="twArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6a8179" /></marker></defs>${lines}</svg>
         <canvas id="twBoardInk" class="tw-board-ink ${ui.boardDraw ? "active" : ""}" width="1600" height="1000"></canvas>
         ${notes.map((note) => `<article class="tw-sticky" data-note-id="${attr(note.id)}" style="left:${note.x}px;top:${note.y}px;width:${note.w}px;height:${note.h}px;background:${attr(note.color)};color:${attr(note.textColor || "#25312d")};z-index:${note.z || 1}">
-          <div class="tw-sticky-grip" data-tw-drag="sticky"><span>${esc(note.tags?.[0] || "Post-it")}</span><div><button data-tw-action="connect-sticky" data-id="${attr(note.id)}" title="Verbinden">⌁</button><button data-tw-action="delete-sticky" data-id="${attr(note.id)}" title="Löschen">×</button></div></div>
+          <div class="tw-sticky-grip" data-tw-drag="sticky"><span>${esc(note.tags?.[0] || "Post-it")}</span><div><button data-tw-action="save-sticky-note" data-id="${attr(note.id)}" title="In Noteflow speichern">${note.noteId ? "↗" : "＋✎"}</button><button data-tw-action="connect-sticky" data-id="${attr(note.id)}" title="Verbinden">⌁</button><button data-tw-action="delete-sticky" data-id="${attr(note.id)}" title="Löschen">×</button></div></div>
           <textarea data-tw-change="sticky-text" data-id="${attr(note.id)}">${esc(note.text)}</textarea>
         </article>`).join("")}
       </div></div>
@@ -238,6 +238,7 @@
       color: note.color || POSTIT_COLORS[0], textColor: note.textColor || "#25312d",
       shape: note.shape || "square", fontSize: note.fontSize || 18, z: note.z || 1,
       tags: asArray(note.tags), votes: Number(note.votes) || 0, locked: Boolean(note.locked),
+      noteId: note.noteId || null,
       createdAt: note.createdAt || new Date().toISOString(), updatedAt: note.updatedAt || new Date().toISOString()
     }));
     board.connections = asArray(board.connections);
@@ -372,11 +373,10 @@
   async function createContextNote() {
     const q = api(); if (!q) return;
     const id = makeId("note"), route = q.state.route || "Tablet";
-    await q.executeOperation(q.makeOperation("entity", "create", "notes", id, {
-      title: `Tablet-Notiz · ${route}`,
-      content: "Handschrift, Sticky Board, Verknüpfungen und Dateien",
-      tags: ["tablet"], externalLinks: [], files: [], fileFolders: [], linkedTasks: [], linkedProjects: [], linkedOrganizations: [], linkedMeetings: []
-    }));
+    await q.saveCanonicalNote({ id, noteClass:"research", title:`Tablet-Notiz · ${route}`,
+      content:"Handschrift, Sticky Board, Verknüpfungen und Dateien", tags:["Tablet"], notebookId:null,
+      source:{ app:"workspace", entityType:"canvas", entityId:null, label:"Tablet Canvas", route:"#/workspace" },
+      externalLinks:[], files:[], fileFolders:[], linkedTasks:[], linkedProjects:[], linkedOrganizations:[], linkedMeetings:[] });
     ui.collection = "notes"; ui.entityId = id; renderOverlay();
   }
 
@@ -494,8 +494,23 @@
     if (action === "ink-copy-note") {
       const source = currentEntity(), q = api(); if (!source || !q) return;
       const id = makeId("note");
-      await q.executeOperation(q.makeOperation("entity", "create", "notes", id, { title: `Handschrift · ${titleOf(source)}`, content: "Handschriftliche Tablet-Notiz", handwriting: source.handwriting, tags: ["handschrift", "tablet"], [COLLECTIONS[ui.collection].link]: [source.id] }));
+      await q.saveCanonicalNote({ id, noteClass:"research", title:`Handschrift · ${titleOf(source)}`, content:"Handschriftliche Tablet-Notiz", handwriting:source.handwriting,
+        tags:[titleOf(source), "Handschrift"], notebookId:null,
+        source:{ app:ui.collection, entityType:COLLECTIONS[ui.collection].kind, entityId:source.id, label:titleOf(source), route:"#/" + ui.collection },
+        [COLLECTIONS[ui.collection].link]:[source.id] });
       return q.toast("Notiz erstellt", "Die Handschrift wurde als verknüpfte Notiz gespeichert", "ok");
+    }
+    if (action === "save-sticky-note") {
+      const entity = currentEntity(), board = normalBoard(entity?.stickyBoard), sticky = board.notes.find((item) => item.id === button.dataset.id), q = api();
+      if (!entity || !sticky || !q) return;
+      if (sticky.noteId && q.state.payload.entities.notes[sticky.noteId]) { q.go("notes"); close(); return; }
+      const noteId = makeId("note");
+      await q.saveCanonicalNote({ id:noteId, noteClass:"research", title:`Post-it · ${titleOf(entity)}`, content:sticky.text,
+        tags:[titleOf(entity)].concat(asArray(sticky.tags)), notebookId:null,
+        source:{ app:"sticky", entityType:"postit", entityId:sticky.id, label:titleOf(entity), route:"#/sticky" },
+        dedupeKey:`sticky:${ui.collection}:${entity.id}:${sticky.id}` });
+      sticky.noteId = noteId; sticky.updatedAt = new Date().toISOString(); entity.stickyBoard = board;
+      await savePatch({ stickyBoard:board }); q.toast("In Noteflow gespeichert", titleOf(entity), "ok"); return renderOverlay();
     }
     if (action === "add-sticky") return addSticky();
     if (action === "board-color") { ui.boardColor = button.dataset.color; return renderOverlay(); }

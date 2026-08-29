@@ -1,8 +1,11 @@
 (function (root, factory) {
-  const api = factory();
+  const notesCore = typeof module === "object" && module.exports
+    ? require("./notes-core.js")
+    : root.QuantusNotesCore;
+  const api = factory(notesCore);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QuantusSyncCore = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (Notes) {
   "use strict";
 
   function clone(value) {
@@ -66,6 +69,8 @@
         tasks: {},
         projects: {},
         notes: {},
+        notebooks: {},
+        books: {},
         meetings: {},
         calendarEvents: {},
         concepts: {},
@@ -77,6 +82,7 @@
         ideas: {},
         decisions: {},
         articles: {},
+        nhOut: {},
         protocols: {},
         workflows: {},
         theses: {},
@@ -93,7 +99,10 @@
   function normalisePayload(input) {
     const payload = isObject(input) ? clone(input) : makeEmptyPayload();
     if (!isObject(payload.entities)) payload.entities = {};
-    ["tasks", "projects", "notes", "meetings", "calendarEvents", "concepts", "strategies", "goals", "programs", "organizations", "persons", "ideas", "decisions", "articles", "protocols", "workflows", "theses", "transactions", "accounts"]
+    // Die Note-Migration muss Array-Altbestaende sehen, bevor die allgemeine
+    // Map-Normalisierung laeuft; sonst wuerden sie hier versehentlich geleert.
+    if (Notes && typeof Notes.migratePayload === "function") Notes.migratePayload(payload);
+    ["tasks", "projects", "notes", "notebooks", "books", "meetings", "calendarEvents", "concepts", "strategies", "goals", "programs", "organizations", "persons", "ideas", "decisions", "articles", "nhOut", "protocols", "workflows", "theses", "transactions", "accounts", "scheduledMessages", "updates", "timeEntries"]
       .forEach((key) => { if (!isObject(payload.entities[key])) payload.entities[key] = {}; });
     if (!isObject(payload.dailyBriefing)) payload.dailyBriefing = {};
     if (!Array.isArray(payload.dailyBriefing.routines)) payload.dailyBriefing.routines = [];
@@ -128,7 +137,7 @@
     });
     if (!isObject(payload.flowertech.counters)) payload.flowertech.counters = {};
     if (!isObject(payload.flowertech.company)) payload.flowertech.company = {};
-    return payload;
+    return Notes && typeof Notes.migratePayload === "function" ? Notes.migratePayload(payload) : payload;
   }
 
   function parseWrapper(raw) {
@@ -375,6 +384,10 @@
     else result = { applied: false, reason: "unsupported-operation" };
 
     if (result.applied) {
+      // Auch Operationen alter Clients, die noch das fruehere freie
+      // Notizformat senden, erscheinen sofort im kanonischen Modell. Die
+      // Migration ist idempotent und erzeugt keine Zeitstempel bei jedem Lauf.
+      if (Notes && typeof Notes.migratePayload === "function") Notes.migratePayload(payload);
       payload.meta.updatedAt = operation.updatedAt;
       payload.meta.lastTabletOperationId = operation.operationId || operation.id;
       // meta.lastSavedBy ist der einzige Fremdgeraete-Marker, den AI Sync

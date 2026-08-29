@@ -106,6 +106,7 @@
 
     return '<div class="view mb-view">' +
       a.viewHeader("Morgenbriefing", gruss(tag, heute) + (tag === heute ? " " + tagText(tag) : ""),
+        '<button class="btn" data-action="briefing-note" data-tag="' + attr(tag) + '">＋ Erkenntnis</button>' +
         '<button class="btn" data-action="db-day" data-tage="-1">‹ Vortag</button>' +
         (tag === heute ? "" : '<button class="btn" data-action="db-day" data-tag="heute">Heute</button>') +
         '<button class="btn" data-action="db-day" data-tage="1">Folgetag ›</button>' +

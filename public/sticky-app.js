@@ -139,7 +139,7 @@
       shape: "square", fontSize: "auto", align: "center", valign: "middle",
       bold: false, italic: false, underline: false, strike: false,
       z: hoechstesZ + 1, tags: [], votes: 0, locked: false,
-      groupId: null, author: "tablet",
+      groupId: null, author: "tablet", noteId: null,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
   }
@@ -295,6 +295,7 @@
               '<div class="sk-note-griff" data-sk-griff="' + attr(n.id) + '" title="Zum Verschieben ziehen">' +
                 '<span class="sk-note-punkte" aria-hidden="true">⠿</span>' +
                 '<span class="sk-note-werkzeuge">' +
+                  '<button class="sk-note-knopf" data-action="sk-note-noteflow" data-id="' + attr(n.id) + '" aria-label="In Noteflow speichern">' + (n.noteId ? "↗" : "＋✎") + "</button>" +
                   '<button class="sk-note-knopf" data-action="sk-note-farbe" data-id="' + attr(n.id) + '" aria-label="Farbe wechseln">◐</button>' +
                   '<button class="sk-note-knopf" data-action="sk-note-weg" data-id="' + attr(n.id) + '" aria-label="Notiz löschen">⌫</button>' +
                 "</span></div>" +
@@ -384,6 +385,26 @@
       var neu = FARBEN[(pos + 1) % FARBEN.length].key;
       var stand2 = schreibeNotiz(button.dataset.id, { color: neu });
       if (stand2) { sichern(ui.offen.collection, ui.offen.id, stand2.board, true); a.render(); }
+      return true;
+    }
+    if (action === "sk-note-noteflow") {
+      var data = boardVon(ui.offen.collection, ui.offen.id);
+      if (!data) return true;
+      var sticky = data.board.notes.find(function (note) { return note.id === button.dataset.id; });
+      if (!sticky) return true;
+      if (sticky.noteId && obj(obj(a.state.payload).entities).notes && obj(obj(a.state.payload).entities).notes[sticky.noteId]) {
+        a.go("notes"); return true;
+      }
+      var noteId = a.Core.makeId("note");
+      a.saveCanonicalNote({ id:noteId, noteClass:"research", title:"Post-it · " + a.itemTitle(data.item,"Board"),
+        content:String(sticky.text || ""), tags:[a.itemTitle(data.item,"Board")].concat(arr(sticky.tags)), notebookId:null,
+        source:{ app:"sticky", entityType:"postit", entityId:sticky.id, label:a.itemTitle(data.item,"Board"), route:"#/sticky" },
+        dedupeKey:"sticky:" + ui.offen.collection + ":" + ui.offen.id + ":" + sticky.id
+      }).then(function () {
+        sticky.noteId = noteId; sticky.updatedAt = new Date().toISOString();
+        sichern(ui.offen.collection, ui.offen.id, data.board, true);
+        a.toast("In Noteflow gespeichert", a.itemTitle(data.item,"Board"), "ok"); a.render();
+      }).catch(function (error) { a.toast("Nicht gespeichert", error.message, "error"); });
       return true;
     }
     if (action === "sk-zoom") {

@@ -3,6 +3,8 @@
 
   const Core = window.QuantusSyncCore;
   if (!Core) throw new Error("QuantusSyncCore fehlt");
+  const Notes = window.QuantusNotesCore;
+  if (!Notes) throw new Error("QuantusNotesCore fehlt");
 
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyC6xVo-wmXC4JjG7qMQnOExIjU-UDvBluE",
@@ -174,6 +176,8 @@
     driveDocs: {},
     smarterDocs: {},
     selectedDocId: null,
+    selectedBookId: null,
+    noteFilter: { mode: "inbox", value: "" },
     dbTag: null,          // gewaehlter Tag im Daily Briefing (null = heute)
     budgetMonat: null,    // gewaehlter Monat im Budget (null = laufender)
     pending: [],
@@ -333,6 +337,36 @@
   function isDone(item) { return item && ["done", "completed", "erledigt", "closed"].includes(item.status); }
   function itemTitle(item, fallback) { return item && (item.title || item.name || item.subject || item.titel) || fallback || "Ohne Titel"; }
   function itemText(item) { return item && (item.description || item.content || item.text || item.notes || item.notiz || "") || ""; }
+
+  function noteContent(note) { return String(note && (note.content == null ? note.description || "" : note.content) || ""); }
+  function noteClassLabel(value) { return Notes.NOTE_CLASS_LABELS[value] || "Notiz"; }
+  function notebooks() { return collection("notebooks"); }
+  let noteTagCacheMap = null;
+  let noteTagCache = [];
+  function noteTags() {
+    const map = asMap(state.payload.entities && state.payload.entities.notes);
+    if (map !== noteTagCacheMap) { noteTagCacheMap = map; noteTagCache = Notes.collectTags(map); }
+    return noteTagCache;
+  }
+  function sourceOf(note) { return Notes.normalizeSource(note && note.source); }
+
+  const CONTEXT_NOTE_COLLECTIONS = new Set([
+    "tasks", "projects", "meetings", "concepts", "strategies", "goals", "programs",
+    "organizations", "persons", "decisions", "protocols", "workflows", "articles", "theses"
+  ]);
+
+  function contextSource(collectionName, item) {
+    const app = collectionName === "theses" ? "thesis" : collectionName;
+    const entityType = COLLECTION_CONFIG[collectionName] && COLLECTION_CONFIG[collectionName].label.toLowerCase()
+      || collectionName.replace(/s$/, "");
+    return {
+      app,
+      entityType,
+      entityId: item && item.id || null,
+      label: itemTitle(item, COLLECTION_CONFIG[collectionName] && COLLECTION_CONFIG[collectionName].label || "Kontext"),
+      route: `#/${COLLECTION_CONFIG[collectionName] && COLLECTION_CONFIG[collectionName].route || app}`
+    };
+  }
 
   function collection(name) {
     return values(state.payload.entities && state.payload.entities[name])
@@ -632,6 +666,31 @@
     };
   }
 
+  async function saveCanonicalNote(input, existingId, options) {
+    const existing = existingId ? asMap(state.payload.entities.notes)[existingId] : null;
+    const id = existingId || input.id || Core.makeId(input.noteClass === "idea" ? "idea" : "note");
+    const compatibility = input.content != null && input.description == null ? { description: input.content } : {};
+    const complete = Notes.createNote({ ...(existing || {}), ...input, ...compatibility, id }, {
+      knownTags: noteTags(),
+      source: input.source,
+      now: new Date().toISOString()
+    });
+    const fields = ["noteClass", "title", "content", "description", "tags", "notebookId", "source", "dedupeKey", "createdAt", "updatedAt", "readingKind", "learningKind", "favorite", "isFavorite"];
+    const patch = existing ? {} : { ...complete };
+    if (existing) fields.forEach((key) => { if (complete[key] !== undefined) patch[key] = complete[key]; });
+    delete patch.id;
+    await executeOperation(makeOperation("entity", existing ? "update" : "create", "notes", id, patch), options);
+    return id;
+  }
+
+  function noteSavedToast(noteId, label) {
+    const node = document.createElement("div");
+    node.className = "toast ok";
+    node.innerHTML = `<strong>${esc(label || "In Noteflow gespeichert")}</strong><span>Inbox und Schlagwortansicht sind aktualisiert.</span><button class="btn small-btn" data-action="open-saved-note" data-id="${attr(noteId)}">In Noteflow öffnen</button>`;
+    document.getElementById("toasts").appendChild(node);
+    setTimeout(() => node.remove(), 7000);
+  }
+
   function queueOperation(operation) {
     if (!state.pending.some((item) => item.operationId === operation.operationId)) state.pending.push(operation);
     // Verdichten statt anhaeufen: pro Element bleibt nur der letzte Stand liegen.
@@ -777,6 +836,7 @@
     return `<div class="list-item ${done ? "done" : ""}" data-action="toggle-habit" data-id="${attr(habit.id)}">
       <span class="check">${done ? "✓" : ""}</span>
       <div class="item-main"><div class="item-title">${esc(habit.name || habit.title || "Gewohnheit")}</div><div class="item-meta">${done ? "Heute erledigt" : "Heute offen"}</div></div>
+      <button class="icon-action" data-action="habit-note" data-id="${attr(habit.id)}" aria-label="Erkenntnis notieren">＋✎</button>
       <span>${esc(habit.icon || "◌")}</span>
     </div>`;
   }
@@ -802,7 +862,7 @@
             <div class="metric"><strong>${events.length}</strong><small>Termine</small></div>
             <div class="metric"><strong>${cards.length}</strong><small>Karteikarten</small></div>
           </div>
-          <div class="row-actions" style="margin-top:18px"><button class="btn primary" data-action="go" data-route="daily">Daily Briefing öffnen</button><button class="btn" data-action="polaris">Polaris fragen</button></div>
+          <div class="row-actions" style="margin-top:18px"><button class="btn primary" data-action="open-shortnote">＋ Shortnote</button><button class="btn" data-action="go" data-route="daily">Daily Briefing öffnen</button><button class="btn" data-action="polaris">Polaris fragen</button></div>
         </section>
         <section class="widget span-5 tall">
           <div class="widget-head"><span class="widget-icon">✓</span><h2>Heute wichtig</h2><button data-action="go" data-route="tasks">Alle</button></div>
@@ -1021,7 +1081,7 @@
     };
 
     return `<div class="view">
-      ${viewHeader("Daily Briefing", datumText, `<button class="btn" data-action="db-day" data-tage="-1">‹ Vortag</button>${tag === heute ? "" : `<button class="btn" data-action="db-day" data-tag="heute">Heute</button>`}<button class="btn" data-action="db-day" data-tage="1">Folgetag ›</button><button class="btn" data-action="polaris">Mit Polaris besprechen</button><button class="btn primary" data-action="new-entity" data-collection="tasks">＋ Aufgabe</button>`)}
+      ${viewHeader("Daily Briefing", datumText, `<button class="btn" data-action="briefing-note" data-tag="${attr(tag)}">＋ Erkenntnis</button><button class="btn" data-action="db-day" data-tage="-1">‹ Vortag</button>${tag === heute ? "" : `<button class="btn" data-action="db-day" data-tag="heute">Heute</button>`}<button class="btn" data-action="db-day" data-tage="1">Folgetag ›</button><button class="btn" data-action="polaris">Mit Polaris besprechen</button><button class="btn primary" data-action="new-entity" data-collection="tasks">＋ Aufgabe</button>`)}
       ${loginBanner()}
       <div class="metric-row">
         <div class="metric"><strong>${b.meetings.length}</strong><small>Termine</small></div>
@@ -1157,10 +1217,14 @@
     const config = COLLECTION_CONFIG[name];
     const meta = item.dueDate || item.date || item.updatedAt || item.createdAt;
     const pinned = state.pins.includes(item.id);
+    const contextNotes = CONTEXT_NOTE_COLLECTIONS.has(name)
+      ? Notes.notesForSource(collection("notes"), contextSource(name, item).app, item.id).length
+      : 0;
     return `<article class="entity-card ${pinned ? "pinned" : ""}">
-      <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}${isOverdue(item) ? `<span class="badge coral">Überfällig</span>` : ""}${pinned ? `<span class="badge sand">Angepinnt</span>` : ""}</div>
+      <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}${isOverdue(item) ? `<span class="badge coral">Überfällig</span>` : ""}${pinned ? `<span class="badge sand">Angepinnt</span>` : ""}${contextNotes ? `<span class="badge">${contextNotes} Notiz${contextNotes === 1 ? "" : "en"}</span>` : ""}</div>
       <h3>${esc(itemTitle(item,config.label))}</h3><p>${esc(itemText(item) || "Keine Beschreibung")}</p>
       <div class="card-foot"><span class="muted small">${meta ? esc(formatDate(meta)) : ""}</span><span class="spacer"></span>
+        ${CONTEXT_NOTE_COLLECTIONS.has(name) ? `<button class="icon-action" data-action="context-note" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Notiz hinzufügen">＋✎</button>` : ""}
         <button class="icon-action" data-action="pin-entity" data-id="${attr(item.id)}" aria-label="${pinned ? "Lösen" : "Anpinnen"}">${pinned ? "★" : "☆"}</button>
         <button class="icon-action" data-action="duplicate-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Duplizieren">⧉</button>
         <button class="icon-action" data-action="edit-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Bearbeiten">✎</button>
@@ -1173,17 +1237,130 @@
     return `<div class="empty-state"><div><span>${esc(icon)}</span><strong>${esc(title)}</strong><p>${esc(text)}</p></div></div>`;
   }
 
+  function tagButtons(tags) {
+    return Notes.normalizeTags(tags).map((tag) => `<button class="note-tag" data-action="note-filter" data-mode="tag" data-value="${attr(tag)}">#${esc(tag)}</button>`).join("");
+  }
+
+  function noteSourceExists(note) {
+    const source = sourceOf(note);
+    if (!source.entityId) return true;
+    if (["noteflow", "shortnote", "ideas"].includes(source.app)) return true;
+    if (source.app === "readinghub") {
+      return source.entityType === "document"
+        ? Boolean(asMap(state.driveDocs)[source.entityId])
+        : Boolean(asMap(state.payload.entities.books)[source.entityId]);
+    }
+    if (source.app === "smarter") return Boolean(asMap(state.smarterDocs)[source.entityId]);
+    if (source.app === "bmpruefung" || source.app === "recalllab" || source.app === "leseplan") return true;
+    if (source.app === "calendar" || source.app === "googlecalendar") {
+      return Boolean(asMap(state.payload.entities.calendarEvents)[source.entityId]
+        || asMap(state.payload.entities.meetings)[source.entityId]);
+    }
+    if (source.app === "articles") {
+      return Notes.sourceEntityCollections(source).some((name) => Boolean(asMap(state.payload.entities[name])[source.entityId]));
+    }
+    const aliases = { thesis:"theses", messages:"scheduledMessages", briefing:"briefings" };
+    const collectionName = aliases[source.app] || source.app;
+    if (asMap(state.payload.entities[collectionName])[source.entityId]) return true;
+    // Einige tablet-native Werkzeuge speichern ihre Originale in eigenstaendigen
+    // synchronisierten Bereichen. Ein Backlink bleibt fuer diese Routen gueltig;
+    // sie duerfen nicht faelschlich als geloeschte Quelle markiert werden.
+    return ["browser", "drive", "pdfeditor", "docstudio", "journal", "reflecta", "briefings",
+      "quantusproject", "flowertech", "mail", "career", "habits", "reports", "workspace", "sticky", "updates"].includes(source.app);
+  }
+
+  function noteCard(note) {
+    const source = sourceOf(note);
+    const notebook = note.notebookId ? asMap(state.payload.entities.notebooks)[note.notebookId] : null;
+    const available = noteSourceExists(note);
+    return `<article class="entity-card note-card" data-note-class="${attr(note.noteClass)}">
+      <div class="row-actions"><span class="badge accent">${esc(noteClassLabel(note.noteClass))}</span>${note.notebookId ? `<span class="badge">${esc(itemTitle(notebook, "Unbekanntes Notizbuch"))}</span>` : `<span class="badge sand">Inbox</span>`}${note.favorite || note.isFavorite ? '<span class="badge">★ Favorit</span>' : ""}</div>
+      <h3>${esc(itemTitle(note, noteClassLabel(note.noteClass)))}</h3>
+      <p>${esc(noteContent(note).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").slice(0, 260) || "Kein Inhalt")}</p>
+      <div class="note-tags">${tagButtons(note.tags)}</div>
+      <div class="note-source ${available ? "" : "missing"}">${available ? "↗" : "!"} ${esc(available ? source.label : "Quelle nicht mehr verfügbar")}</div>
+      <div class="card-foot"><span class="muted small">${esc(formatDate(note.updatedAt || note.createdAt))}</span><span class="spacer"></span>
+        ${source.app !== "noteflow" ? `<button class="icon-action" data-action="note-source" data-id="${attr(note.id)}" aria-label="Quelle öffnen">↗</button>` : ""}
+        <button class="icon-action" data-action="edit-note" data-id="${attr(note.id)}" aria-label="Notiz bearbeiten">✎</button>
+        <button class="icon-action" data-action="delete-entity" data-collection="notes" data-id="${attr(note.id)}" aria-label="Notiz löschen">⌫</button>
+      </div>
+    </article>`;
+  }
+
+  function noteFilterSelect(mode, label, valuesList) {
+    const current = state.noteFilter.mode === mode ? state.noteFilter.value : "";
+    return `<select class="sort-select" data-action="note-filter-select" data-mode="${attr(mode)}" aria-label="${attr(label)}"><option value="">${esc(label)}</option>${valuesList.map((entry) => `<option value="${attr(entry.value)}" ${current === entry.value ? "selected" : ""}>${esc(entry.label)}</option>`).join("")}</select>`;
+  }
+
+  function renderNotes() {
+    let notes = collection("notes");
+    const filter = state.noteFilter || { mode: "inbox", value: "" };
+    if (filter.mode === "inbox") notes = notes.filter((note) => !note.notebookId);
+    else if (filter.mode === "favorites") notes = notes.filter((note) => note.favorite || note.isFavorite);
+    else if (filter.mode === "class") notes = notes.filter((note) => note.noteClass === filter.value);
+    else if (filter.mode === "notebook") notes = notes.filter((note) => note.notebookId === filter.value);
+    else if (filter.mode === "tag") notes = notes.filter((note) => Notes.normalizeTags(note.tags).some((tag) => tag.toLocaleLowerCase("de-CH") === filter.value.toLocaleLowerCase("de-CH")));
+    else if (filter.mode === "source") notes = notes.filter((note) => sourceOf(note).app === filter.value);
+    if (filter.mode === "recent") notes = notes.slice(0, 20);
+    if (state.search) {
+      const query = state.search.toLocaleLowerCase("de-CH");
+      notes = notes.filter((note) => [itemTitle(note), noteContent(note), Notes.normalizeTags(note.tags).join(" "), sourceOf(note).label].join(" ").toLocaleLowerCase("de-CH").includes(query));
+    }
+    const sources = Array.from(new Map(collection("notes").map((note) => {
+      const source = sourceOf(note); return [source.app, { value: source.app, label: source.label || source.app }];
+    })).values()).sort((a, b) => a.label.localeCompare(b.label, "de"));
+    const chip = (mode, label) => `<button class="chip ${filter.mode === mode ? "on" : ""}" data-action="note-filter" data-mode="${mode}">${label}</button>`;
+    return `<div class="view noteflow-view">
+      ${viewHeader("Noteflow", "Alle Quantus-Notizen – zentral, synchronisiert und ohne erzwungenes Notizbuch.", `<button class="btn" data-action="open-shortnote">Kurze Notiz</button><button class="btn primary" data-action="new-note">＋ Notiz</button>`)}
+      ${loginBanner()}
+      <div class="filterbar note-filterbar">
+        <div class="search-field"><span>⌕</span><input data-action="filter-collection" placeholder="Titel, Inhalt, Schlagwort oder Quelle" value="${attr(state.search)}"></div>
+        <div class="chip-row">${chip("inbox", `Inbox ${collection("notes").filter((note) => !note.notebookId).length}`)}${chip("all", "Alle")}${chip("favorites", "Favoriten")}${chip("recent", "Zuletzt bearbeitet")}</div>
+        <div class="chip-row note-class-chips">${Notes.NOTE_CLASSES.map((key) => `<button class="chip ${filter.mode === "class" && filter.value === key ? "on" : ""}" data-action="note-filter" data-mode="class" data-value="${key}">${esc(Notes.NOTE_CLASS_LABELS[key])}</button>`).join("")}</div>
+        <div class="note-select-filters">${noteFilterSelect("notebook", "Notizbuch", notebooks().map((book) => ({ value: book.id, label: itemTitle(book, "Notizbuch") })))}${noteFilterSelect("tag", "Schlagwort", noteTags().map((tag) => ({ value: tag, label: "#" + tag })))}${noteFilterSelect("source", "Quelle/App", sources)}</div>
+      </div>
+      <div class="content-grid">${notes.map(noteCard).join("") || emptyState("✎", "Keine Notizen", filter.mode === "inbox" ? "Neue Notizen ohne Notizbuch erscheinen hier." : "Für diesen Filter gibt es noch keine Notiz.")}</div>
+    </div>`;
+  }
+
+  function renderIdeas() {
+    const notes = collection("notes").filter((note) => note.noteClass === "idea");
+    return `<div class="view">
+      ${viewHeader("Ideen", "Kategorie und Idee – danach liegt sie zentral in Noteflow und der Inbox.", `<button class="btn" data-action="go" data-route="notes">In Noteflow öffnen</button><button class="btn primary" data-action="new-idea">＋ Idee</button>`)}
+      ${loginBanner()}
+      <div class="content-grid">${notes.map(noteCard).join("") || emptyState("✦", "Noch keine Ideen", "Erfasse eine Kategorie und deinen Gedanken.")}</div>
+    </div>`;
+  }
+
   function renderReading() {
+    const books = collection("books");
     const docs = values(state.driveDocs).map((doc) => ({ ...doc, id: doc.id || findMapKey(state.driveDocs,doc) })).filter((doc) => doc.status !== "papierkorb").sort((a,b) => Date.parse(b.aktualisiert || b.erstellt || 0) - Date.parse(a.aktualisiert || a.erstellt || 0));
-    if (!state.selectedDocId && docs.length) state.selectedDocId = docs[0].id;
+    if (!state.selectedBookId && !state.selectedDocId && books.length) state.selectedBookId = books[0].id;
+    const selectedBook = books.find((book) => book.id === state.selectedBookId);
     const selected = docs.find((doc) => doc.id === state.selectedDocId);
     return `<div class="view">
-      ${viewHeader("Lesen", "Dokumente aus Quantus Drive lesen, markieren und in Wissen umwandeln.", `<button class="btn" data-action="split-with" data-route="reading">◫ Split-Screen</button><button class="btn" data-action="external" data-path="drive.html">↗ Drive in der Vollversion</button>`)}
+      ${viewHeader("Reading Hub", "Bücher nur per Titel registrieren oder Dokumente direkt lesen – weitere Angaben bleiben optional.", `<button class="btn" data-action="split-with" data-route="reading">◫ Split-Screen</button><button class="btn" data-action="external" data-path="drive.html">↗ Drive</button><button class="btn primary" data-action="register-book">＋ Buch registrieren</button>`)}
       ${loginBanner()}
       <div class="reading-layout">
-        <aside class="library-panel"><div class="panel-head"><strong>Bibliothek</strong><span class="badge">${docs.length}</span></div><div class="library-list">${docs.map((doc) => `<div class="doc-row ${doc.id === state.selectedDocId ? "on" : ""}" data-action="open-doc" data-id="${attr(doc.id)}"><strong class="truncate" style="display:block">${esc(doc.titel_final || doc.dateiname || "Dokument")}</strong><small class="muted">${esc(doc.bereich || doc.mimeType || "Drive")}</small></div>`).join("") || emptyMini("Noch keine Dokumente in Quantus Drive")}</div></aside>
-        <section class="reader-panel">${renderReaderDocument(selected)}</section>
+        <aside class="library-panel"><div class="panel-head"><strong>Bücher</strong><span class="badge">${books.length}</span></div><div class="library-list">${books.map((book) => `<div class="doc-row ${book.id === state.selectedBookId ? "on" : ""}" data-action="open-book" data-id="${attr(book.id)}"><strong class="truncate" style="display:block">${esc(book.title || "Ohne Titel")}</strong><small class="muted">${esc(book.author || bookStatusLabel(book.status))}</small></div>`).join("") || emptyMini("Titel registrieren – Datei ist optional")}</div><div class="panel-head"><strong>Drive-Dokumente</strong><span class="badge">${docs.length}</span></div><div class="library-list">${docs.map((doc) => `<div class="doc-row ${doc.id === state.selectedDocId ? "on" : ""}" data-action="open-doc" data-id="${attr(doc.id)}"><strong class="truncate" style="display:block">${esc(doc.titel_final || doc.dateiname || "Dokument")}</strong><small class="muted">${esc(doc.bereich || doc.mimeType || "Drive")}</small></div>`).join("") || emptyMini("Keine Drive-Dokumente")}</div></aside>
+        <section class="reader-panel">${selectedBook ? renderBookDetail(selectedBook) : renderReaderDocument(selected)}</section>
       </div>
+    </div>`;
+  }
+
+  function bookStatusLabel(status) {
+    return { registered: "Registriert / ungelesen", reading: "Lese ich", paused: "Pausiert", completed: "Gelesen", abandoned: "Abgebrochen" }[Notes.normalizeBookStatus(status)] || "Registriert / ungelesen";
+  }
+
+  function renderBookDetail(book) {
+    const notes = Notes.notesForSource(collection("notes"), "readinghub", book.id).filter((note) => note.noteClass === "reading");
+    const url = book.firebaseUrl || book.fileUrl || book.downloadUrl || "";
+    return `<div class="book-detail">
+      <div class="panel-head"><strong class="truncate">${esc(book.title)}</strong><button class="btn small-btn" data-action="edit-book" data-id="${attr(book.id)}">Metadaten</button><button class="btn primary small-btn" data-action="reading-note" data-id="${attr(book.id)}">＋ Lesenotiz</button></div>
+      <div class="book-hero"><div class="book-cover">▤</div><div><span class="badge accent">${esc(bookStatusLabel(book.status))}</span><h1>${esc(book.title)}</h1><p>${esc(book.author || "Autor noch nicht ergänzt")}</p>${book.isbn ? `<small>ISBN ${esc(book.isbn)}</small>` : ""}</div></div>
+      <div class="book-metadata"><span>${book.totalPages || book.pages ? `${esc(book.totalPages || book.pages)} Seiten` : "Seitenzahl offen"}</span><span>${book.progress ? `${esc(book.progress)} % gelesen` : "Fortschritt offen"}</span>${url ? `<button class="btn small-btn" data-action="external-url" data-url="${attr(url)}">Datei öffnen</button>` : ""}</div>
+      <section class="book-notes"><div class="widget-head"><span class="widget-icon">✎</span><h2>Lesenotizen</h2><span class="badge">${notes.length}</span></div>${notes.map((note) => `<div class="list-item"><span class="badge sand">${esc(({ quote:"Zitat", summary:"Zusammenfassung", insight:"Erkenntnis", note:"Lesenotiz" })[note.readingKind] || "Lesenotiz")}</span><div class="item-main"><div class="item-title">${esc(itemTitle(note))}</div><div class="item-meta">${esc(noteContent(note).slice(0, 140))}</div></div><button class="icon-action" data-action="edit-note" data-id="${attr(note.id)}">✎</button></div>`).join("") || emptyMini("Nach dem Lesen eine kurze Lesenotiz festhalten.")}</section>
+      <section class="book-functions"><h2>Später ergänzen</h2><p class="muted">Datei/PDF, Fortschritt, Annotationen, Zitate und RecallLab-Verknüpfungen bleiben am selben Buch erhalten.</p></section>
     </div>`;
   }
 
@@ -1193,7 +1370,7 @@
     const url = doc.downloadUrl || doc.fileUrl || "";
     const isPdf = /pdf/i.test(doc.mimeType || doc.dateiname || "");
     const text = doc.textauszug || doc.text || "";
-    return `<div class="panel-head"><button class="icon-action" data-action="reader-wide" title="Bibliothek ein-/ausblenden">◫</button><button class="icon-action" data-action="reader-full" title="Vollbild">⛶</button><button class="icon-action" data-action="external-url" data-url="${attr(url)}" ${url ? "" : "disabled"}>↗</button><strong class="truncate">${esc(name)}</strong><button class="btn small-btn" data-action="polaris-selection" data-text="${attr(name)}">Polaris</button></div>
+    return `<div class="panel-head"><button class="icon-action" data-action="reader-wide" title="Bibliothek ein-/ausblenden">◫</button><button class="icon-action" data-action="reader-full" title="Vollbild">⛶</button><button class="icon-action" data-action="external-url" data-url="${attr(url)}" ${url ? "" : "disabled"}>↗</button><strong class="truncate">${esc(name)}</strong><button class="btn small-btn" data-action="reading-document-note" data-id="${attr(doc.id)}">Lesenotiz</button><button class="btn small-btn" data-action="polaris-selection" data-text="${attr(name)}">Polaris</button></div>
       ${isPdf && url
         // PDF: EIGENER Behaelter ohne Lesepolster. Vorher steckte das Dokument
         // in .reader-content mit 24 px oben/unten und bis zu 54 px seitlich —
@@ -1221,7 +1398,7 @@
       <div class="dashboard-grid">
         <section class="widget span-4"><div class="widget-head"><span class="widget-icon">▣</span><h2>Karteikarten</h2></div><div class="hero-title" style="font-size:38px">${due.length}</div><p class="muted">heute fällig · ${cards.length} insgesamt</p><div class="progress"><i style="width:${cards.length ? Math.max(4,Math.min(100,((cards.length-due.length)/cards.length)*100)) : 0}%"></i></div></section>
         <section class="widget span-8"><div class="widget-head"><span class="widget-icon">▤</span><h2>Smarter – letzter Lernstoff</h2></div>${docEntries.slice(0,3).map(([date,doc]) => `<div class="list-item"><span class="badge accent">${esc(formatDate(date))}</span><div class="item-main"><div class="item-title">${esc(doc.title || doc.titel || "Tageslektion")}</div><div class="item-meta">${asArray(doc.questions).length} Fragen</div></div><button class="icon-action" data-action="go" data-route="smarter">↗</button></div>`).join("") || emptyMini("Noch kein Smarter-Dokument geladen")}</section>
-        <section class="widget span-12"><div class="widget-head"><span class="widget-icon">▣</span><h2>Fällige Karten</h2></div><div class="content-grid">${due.slice(0,12).map((card) => `<article class="entity-card"><span class="badge sand">${esc(card.deckId || "Allgemein")}</span><h3>${esc(card.front || "Vorderseite")}</h3><p>${esc(card.back || "Rückseite")}</p><div class="card-foot"><span class="spacer"></span><button class="btn small-btn" data-action="edit-flashcard" data-id="${attr(card.id)}">Bearbeiten</button></div></article>`).join("") || emptyState("✓","Alles wiederholt","Heute sind keine Karteikarten fällig.")}</div></section>
+        <section class="widget span-12"><div class="widget-head"><span class="widget-icon">▣</span><h2>Fällige Karten</h2></div><div class="content-grid">${due.slice(0,12).map((card) => `<article class="entity-card"><span class="badge sand">${esc(card.deckId || "Allgemein")}</span><h3>${esc(card.front || "Vorderseite")}</h3><p>${esc(card.back || "Rückseite")}</p><div class="card-foot"><span class="spacer"></span><button class="btn small-btn" data-action="learning-card-note" data-id="${attr(card.id)}">Lernnotiz</button><button class="btn small-btn" data-action="edit-flashcard" data-id="${attr(card.id)}">Bearbeiten</button></div></article>`).join("") || emptyState("✓","Alles wiederholt","Heute sind keine Karteikarten fällig.")}</div></section>
       </div>
     </div>`;
   }
@@ -1234,7 +1411,7 @@
       <div class="concept-board">${concepts.map((item,index) => {
         const x = Number(item.x) || 28 + (index % 4) * 255;
         const y = Number(item.y) || 28 + Math.floor(index / 4) * 175;
-        return `<article class="concept-note" style="left:${x}px;top:${y}px" data-action="edit-entity" data-collection="concepts" data-id="${attr(item.id)}"><span class="badge accent">${esc(item.category || "Konzept")}</span><h3>${esc(itemTitle(item,"Idee"))}</h3><p>${esc(itemText(item) || "Tippen, um den Gedanken auszuarbeiten.")}</p></article>`;
+        return `<article class="concept-note" style="left:${x}px;top:${y}px"><span class="badge accent">${esc(item.category || "Konzept")}</span><h3>${esc(itemTitle(item,"Idee"))}</h3><p>${esc(itemText(item) || "Tippen, um den Gedanken auszuarbeiten.")}</p><div class="card-foot"><button class="icon-action" data-action="context-note" data-collection="concepts" data-id="${attr(item.id)}" aria-label="Notiz hinzufügen">＋✎</button><button class="icon-action" data-action="edit-entity" data-collection="concepts" data-id="${attr(item.id)}" aria-label="Konzept bearbeiten">✎</button></div></article>`;
       }).join("") || `<div class="reader-empty"><div><span style="font-size:48px">◇</span><h2>Leere Arbeitsfläche</h2><p>Erstelle deine erste Konzeptkarte.</p><button class="btn primary" data-action="new-entity" data-collection="concepts">＋ Karte</button></div></div>`}</div>
     </div>`;
   }
@@ -1511,7 +1688,7 @@
     return `<div class="view">
       ${viewHeader("Kalender", "Deine Termine und Meetings als tabletnative Agenda.", `<button class="btn" data-action="split-with" data-route="daily">◫ Split-Screen</button><button class="btn primary" data-action="new-entity" data-collection="meetings">＋ Termin</button>`)}
       ${loginBanner()}
-      <div class="dashboard-grid">${days.map((day) => `<section class="widget span-6"><div class="widget-head"><span class="widget-icon">◉</span><h2>${esc(formatDate(day, { weekday: "long", day: "2-digit", month: "long" }))}${day === today ? " · Heute" : ""}</h2></div><div class="item-list">${grouped[day].map((event) => `<div class="list-item"><span class="badge accent">${esc(formatTime(event.start || event.startAt || event.time) || "Ganztags")}</span><div class="item-main"><div class="item-title">${esc(itemTitle(event, "Termin"))}</div><div class="item-meta">${esc(event.location || event.place || event.description || "")}</div></div></div>`).join("")}</div></section>`).join("") || emptyState("◉", "Keine kommenden Termine", "Erstelle einen Termin auf dem Tablet oder in AI Sync.")}</div>
+      <div class="dashboard-grid">${days.map((day) => `<section class="widget span-6"><div class="widget-head"><span class="widget-icon">◉</span><h2>${esc(formatDate(day, { weekday: "long", day: "2-digit", month: "long" }))}${day === today ? " · Heute" : ""}</h2></div><div class="item-list">${grouped[day].map((event) => `<div class="list-item"><span class="badge accent">${esc(formatTime(event.start || event.startAt || event.time) || "Ganztags")}</span><div class="item-main"><div class="item-title">${esc(itemTitle(event, "Termin"))}</div><div class="item-meta">${esc(event.location || event.place || event.description || "")}</div></div><button class="icon-action" data-action="calendar-note" data-id="${attr(event.id)}" aria-label="Als Notiz speichern">＋✎</button></div>`).join("")}</div></section>`).join("") || emptyState("◉", "Keine kommenden Termine", "Erstelle einen Termin auf dem Tablet oder in AI Sync.")}</div>
     </div>`;
   }
 
@@ -1590,7 +1767,7 @@
     const activity = recentActivity(40);
     const perType = countBy(activity, (entry) => entry.config.label);
     return `<div class="view">
-      ${viewHeader("Berichte", "Aktueller Bestand und die juengsten Aktualisierungen über alle Quantus-Bereiche.", `<button class="btn" data-action="external" data-path="index.html#/reports">↗ Vollversion</button>`)}
+      ${viewHeader("Berichte", "Aktueller Bestand und die juengsten Aktualisierungen über alle Quantus-Bereiche.", `<button class="btn" data-action="report-note">＋ Erkenntnis</button><button class="btn" data-action="external" data-path="index.html#/reports">↗ Vollversion</button>`)}
       ${loginBanner()}
       <div class="budget-metrics">${Object.entries(perType).slice(0, 6).map(([label, value]) => `<div class="budget-metric"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`).join("") || `<div class="budget-metric"><small>Einträge</small><strong>0</strong></div>`}</div>
       <section class="widget"><div class="widget-head"><span class="widget-icon">↻</span><h2>Letzte Aktualisierungen</h2></div><div class="item-list">${activity.map(({ config, item }) => `<div class="list-item"><span class="badge accent">${esc(config.label)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Aktivität – melde dich an, um deine Quantus-Daten zu laden.")}</div></section>
@@ -1805,6 +1982,8 @@
     if (route === "settings") return renderSettings();
     if (route === "daily" || route === "dailybriefing") return renderDaily();
     if (route === "reading") return renderReading();
+    if (route === "notes") return renderNotes();
+    if (route === "ideas") return renderIdeas();
     if (route === "learning") return renderLearning();
     if (route === "habits") return renderHabits();
     if (route === "budget") return renderBudget();
@@ -1875,6 +2054,89 @@
     if (focus) setTimeout(() => focus.focus(), 20);
   }
 
+  function notebookSelect(selected) {
+    return `<div class="field"><label>Notizbuch <small>(optional)</small></label><select name="notebookId"><option value="">Inbox – später zuordnen</option>${notebooks().map((book) => `<option value="${attr(book.id)}" ${selected === book.id ? "selected" : ""}>${esc(itemTitle(book, "Notizbuch"))}</option>`).join("")}</select><small class="field-hint">Es wird kein neues Notizbuch automatisch erstellt.</small></div>`;
+  }
+
+  function tagEditor(tags, options) {
+    const valuesList = Notes.normalizeTags(tags);
+    const opts = options || {};
+    return `<div class="field full tag-field" data-tag-editor data-single="${opts.single ? "true" : "false"}"><label>${esc(opts.label || "Schlagwörter")}${opts.required ? " *" : ""}</label><div class="tag-editor"><div class="tag-editor-chips" data-tag-chips>${valuesList.map((tag) => `<button type="button" class="tag-chip" data-action="remove-tag" data-tag="${attr(tag)}">#${esc(tag)} ×</button>`).join("")}</div><input type="hidden" name="${attr(opts.name || "tags")}" value="${attr(valuesList.join(", "))}"><input data-tag-autocomplete role="combobox" aria-autocomplete="list" aria-expanded="false" placeholder="${attr(opts.placeholder || "Schlagwort tippen und Enter drücken")}" autocomplete="off"><div class="tag-suggestions" data-tag-suggestions role="listbox" hidden></div></div><small class="field-hint">Bestehende Schlagwörter werden beim Tippen gefiltert. Enter übernimmt einen neuen Wert.</small></div>`;
+  }
+
+  function openNoteForm(options) {
+    const opts = options || {};
+    const existing = opts.id ? collection("notes").find((note) => note.id === opts.id) : null;
+    const source = Notes.normalizeSource(opts.source || existing && existing.source, { app: "noteflow", label: "Noteflow", route: "#/notes" });
+    const noteClass = opts.noteClass || existing && existing.noteClass || "general";
+    const fixedClass = Boolean(opts.lockClass);
+    const tags = opts.tags || existing && existing.tags || [];
+    const readingKind = opts.readingKind || existing && existing.readingKind || "note";
+    const learningKind = opts.learningKind || existing && existing.learningKind || "merksatz";
+    const body = `<form data-form="note" data-id="${attr(existing && existing.id || "")}" data-source-app="${attr(source.app)}" data-source-type="${attr(source.entityType || "")}" data-source-id="${attr(source.entityId || "")}" data-source-label="${attr(source.label || "")}" data-source-route="${attr(source.route || "")}">
+      <div class="form-grid">
+        <div class="field"><label>Notizklasse</label>${fixedClass ? `<input type="hidden" name="noteClass" value="${attr(noteClass)}"><div class="readonly-field">${esc(noteClassLabel(noteClass))}</div>` : `<select name="noteClass" data-action="note-class-select">${Notes.NOTE_CLASSES.map((key) => `<option value="${key}" ${noteClass === key ? "selected" : ""}>${esc(Notes.NOTE_CLASS_LABELS[key])}</option>`).join("")}</select>`}</div>
+        <div class="field"><label>Titel <small>(optional)</small></label><input name="title" value="${attr(opts.title == null ? existing && existing.title || "" : opts.title)}" placeholder="Wird sonst aus dem Inhalt gebildet"></div>
+        <div class="field full"><label>Inhalt *</label><textarea name="content" rows="7" required>${esc(opts.content == null ? existing && noteContent(existing) || "" : opts.content)}</textarea></div>
+        <div class="field" data-note-subtype="reading" ${noteClass === "reading" ? "" : "hidden"}><label>Art der Lesenotiz</label><select name="readingKind"><option value="note" ${readingKind === "note" ? "selected" : ""}>Eigene Notiz</option><option value="quote" ${readingKind === "quote" ? "selected" : ""}>Zitat</option><option value="summary" ${readingKind === "summary" ? "selected" : ""}>Zusammenfassung</option><option value="insight" ${readingKind === "insight" ? "selected" : ""}>Erkenntnis</option></select></div>
+        <div class="field" data-note-subtype="learning" ${noteClass === "learning" ? "" : "hidden"}><label>Art der Lernnotiz</label><select name="learningKind">${Notes.LEARNING_KINDS.map((key) => `<option value="${key}" ${learningKind === key ? "selected" : ""}>${esc({ merksatz:"Merksatz", erklaerung:"Erklärung", fehler:"Fehleranalyse", frage:"Frage", zusammenfassung:"Zusammenfassung" }[key])}</option>`).join("")}</select></div>
+        ${tagEditor(tags, { required: noteClass !== "general", label: "Schlagwörter" })}
+        ${notebookSelect(opts.notebookId == null ? existing && existing.notebookId : opts.notebookId)}
+        <div class="field"><label>Quelle</label><div class="readonly-field">${esc(source.label || source.app)}</div></div>
+      </div>
+      <div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">In Noteflow speichern</button></div>
+    </form>`;
+    sheet(existing ? "Notiz bearbeiten" : noteClassLabel(noteClass), body, "wide");
+  }
+
+  function openIdeaForm() {
+    sheet("Neue Idee", `<form data-form="idea"><div class="form-grid"><div class="field full"><label>Kategorie *</label><input name="category" list="quantus-tag-list" required autocomplete="off" placeholder="Zum Beispiel: Medienprojekt"><datalist id="quantus-tag-list">${noteTags().map((tag) => `<option value="${attr(tag)}"></option>`).join("")}</datalist><small class="field-hint">Die Kategorie wird als Schlagwort gespeichert.</small></div><div class="field full"><label>Idee *</label><textarea name="idea" rows="7" required placeholder="Was ist dir eingefallen?"></textarea></div></div><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">In Inbox speichern</button></div></form>`);
+  }
+
+  function openBookForm(id) {
+    const book = id ? collection("books").find((item) => item.id === id) : null;
+    sheet(book ? "Buch ergänzen" : "Buch registrieren", `<form data-form="book" data-id="${attr(id || "")}"><div class="form-grid"><div class="field full"><label>Titel *</label><input name="title" required value="${attr(book && book.title)}" placeholder="Nur der Titel ist notwendig"></div><div class="field"><label>Autor <small>(optional)</small></label><input name="author" value="${attr(book && book.author)}"></div><div class="field"><label>Status</label><select name="status">${Notes.BOOK_STATUSES.map((key) => `<option value="${key}" ${Notes.normalizeBookStatus(book && book.status) === key ? "selected" : ""}>${esc(bookStatusLabel(key))}</option>`).join("")}</select></div><div class="field"><label>ISBN <small>(optional)</small></label><input name="isbn" value="${attr(book && book.isbn)}"></div><div class="field"><label>Seitenzahl <small>(optional)</small></label><input name="totalPages" type="number" min="1" value="${attr(book && book.totalPages)}"></div><div class="field full"><label>Datei-/Webadresse <small>(optional)</small></label><input name="fileUrl" type="url" value="${attr(book && (book.fileUrl || book.firebaseUrl || book.downloadUrl))}"></div></div><p class="muted small">Annotationen, Lesenotizen und bestehende Verknüpfungen bleiben beim späteren Ergänzen unverändert.</p><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">${book ? "Änderungen speichern" : "Titel registrieren"}</button></div></form>`);
+  }
+
+  function openShortnote(prefill) {
+    const local = new Date(Date.now() + 60 * 60 * 1000);
+    const localValue = new Date(local.getTime() - local.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    sheet("Shortnote", `<form data-form="shortnote"><div class="shortnote-type" role="radiogroup"><label><input type="radio" name="shortType" value="note" checked data-action="shortnote-type"> Notiz</label><label><input type="radio" name="shortType" value="message" data-action="shortnote-type"> Mitteilung</label></div><div class="field full"><label>Text *</label><textarea name="content" rows="4" required autofocus placeholder="Kurz festhalten …">${esc(prefill || "")}</textarea></div><div data-shortnote-section="note">${tagEditor([], { required:true, single:true, label:"Schlagwortkategorie" })}<p class="muted small">Die Notiz landet in der Inbox und unter diesem Schlagwort.</p></div><div data-shortnote-section="message" hidden><div class="field"><label>Zustellzeitpunkt *</label><input name="deliverAt" type="datetime-local" value="${attr(localValue)}"></div><p class="muted small">Mitteilungen werden geplant und nicht als Notiz dupliziert.</p></div><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Speichern</button></div></form>`, "shortnote-sheet");
+  }
+
+  function openContextNote(collectionName, id, noteClass) {
+    const item = collection(collectionName).find((entry) => entry.id === id);
+    if (!item) return toast("Quelle nicht verfügbar", "Das verknüpfte Element wurde gelöscht.", "error");
+    const source = contextSource(collectionName, item);
+    openNoteForm({ noteClass: noteClass || "research", lockClass: true, source, tags: [source.label], title: `Notiz · ${source.label}` });
+  }
+
+  function tagEditorValues(editor) {
+    const hidden = editor && editor.querySelector('input[type="hidden"]');
+    return Notes.normalizeTags(hidden && hidden.value);
+  }
+
+  function updateTagEditor(editor, tags) {
+    if (!editor) return;
+    const normalized = Notes.normalizeTags(tags, noteTags());
+    const hidden = editor.querySelector('input[type="hidden"]');
+    const chips = editor.querySelector("[data-tag-chips]");
+    if (hidden) hidden.value = normalized.join(", ");
+    if (chips) chips.innerHTML = normalized.map((tag) => `<button type="button" class="tag-chip" data-action="remove-tag" data-tag="${attr(tag)}">#${esc(tag)} ×</button>`).join("");
+  }
+
+  function addEditorTag(editor, raw) {
+    const value = String(raw || "").trim();
+    if (!editor || !value) return;
+    const current = tagEditorValues(editor);
+    const tags = editor.dataset.single === "true" ? [value] : current.concat([value]);
+    updateTagEditor(editor, tags);
+    const input = editor.querySelector("[data-tag-autocomplete]");
+    const menu = editor.querySelector("[data-tag-suggestions]");
+    if (input) { input.value = ""; input.setAttribute("aria-expanded", "false"); input.focus(); }
+    if (menu) { menu.hidden = true; menu.innerHTML = ""; }
+  }
+
   function openEntityForm(name, id) {
     const config = COLLECTION_CONFIG[name];
     if (!config) return;
@@ -1884,7 +2146,13 @@
     const draft = !existing ? state.drafts[name] : null;
     const draftTitle = draft && draft.title || "";
     const draftText = draft && draft.description || "";
-    const body = `<form data-form="entity" data-collection="${attr(name)}" data-id="${attr(id || "")}">${draft ? `<p class="muted small" style="margin:0 0 10px">Entwurf von ${esc(relativeTime(draft.savedAt))} wiederhergestellt.</p>` : ""}<div class="form-grid"><div class="field full"><label>Titel</label><input name="title" value="${attr(existing ? itemTitle(existing,"") : draftTitle)}" required></div><div class="field full"><label>Beschreibung / Inhalt</label><textarea name="description">${esc(existing ? itemText(existing) : draftText)}</textarea></div><div class="field"><label>Status</label><select name="status"><option value="open" ${!existing||existing.status==="open"?"selected":""}>Offen</option><option value="in_progress" ${existing&&existing.status==="in_progress"?"selected":""}>In Arbeit</option><option value="done" ${existing&&isDone(existing)?"selected":""}>Erledigt</option></select></div><div class="field"><label>${name === "meetings" ? "Datum" : "Fällig am"}</label><input name="date" type="date" value="${attr(existing && String(existing.date || existing.dueDate || "").slice(0,10))}"></div>${name === "meetings" ? `<div class="field"><label>Zeit</label><input name="time" type="time" value="${attr(existing && (existing.time || ""))}"></div><div class="field"><label>Ort</label><input name="location" value="${attr(existing && existing.location)}"></div>` : ""}</div><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Mit AI Sync speichern</button></div></form>`;
+    const linkedNotes = existing && CONTEXT_NOTE_COLLECTIONS.has(name)
+      ? Notes.notesForSource(collection("notes"), contextSource(name, existing).app, existing.id)
+      : [];
+    const noteSection = existing && CONTEXT_NOTE_COLLECTIONS.has(name)
+      ? `<section class="entity-linked-notes"><div class="widget-head"><span class="widget-icon">✎</span><h3>Notizen</h3><button class="btn small-btn" type="button" data-action="context-note" data-collection="${attr(name)}" data-id="${attr(existing.id)}">＋ Notiz</button></div><div class="item-list">${linkedNotes.map((note) => `<button class="list-item" type="button" data-action="edit-note" data-id="${attr(note.id)}"><span class="badge accent">${esc(noteClassLabel(note.noteClass))}</span><span class="item-main"><strong class="item-title">${esc(itemTitle(note))}</strong><small class="item-meta">${esc(noteContent(note).slice(0, 100))}</small></span></button>`).join("") || emptyMini("Noch keine verknüpfte Notiz")}</div></section>`
+      : "";
+    const body = `<form data-form="entity" data-collection="${attr(name)}" data-id="${attr(id || "")}">${draft ? `<p class="muted small" style="margin:0 0 10px">Entwurf von ${esc(relativeTime(draft.savedAt))} wiederhergestellt.</p>` : ""}<div class="form-grid"><div class="field full"><label>Titel</label><input name="title" value="${attr(existing ? itemTitle(existing,"") : draftTitle)}" required></div><div class="field full"><label>Beschreibung / Inhalt</label><textarea name="description">${esc(existing ? itemText(existing) : draftText)}</textarea></div><div class="field"><label>Status</label><select name="status"><option value="open" ${!existing||existing.status==="open"?"selected":""}>Offen</option><option value="in_progress" ${existing&&existing.status==="in_progress"?"selected":""}>In Arbeit</option><option value="done" ${existing&&isDone(existing)?"selected":""}>Erledigt</option></select></div><div class="field"><label>${name === "meetings" ? "Datum" : "Fällig am"}</label><input name="date" type="date" value="${attr(existing && String(existing.date || existing.dueDate || "").slice(0,10))}"></div>${name === "meetings" ? `<div class="field"><label>Zeit</label><input name="time" type="time" value="${attr(existing && (existing.time || ""))}"></div><div class="field"><label>Ort</label><input name="location" value="${attr(existing && existing.location)}"></div>` : ""}</div>${noteSection}<div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Mit AI Sync speichern</button></div></form>`;
     sheet(`${existing ? "Bearbeiten" : "Neu"}: ${config.label}`, body);
   }
 
@@ -1945,7 +2213,7 @@
     tools.style.left = "50%";
     tools.style.bottom = "110px";
     tools.style.transform = "translateX(-50%)";
-    tools.innerHTML = `<button data-action="translate-selection" data-text="${attr(text)}">Übersetzen</button><button data-action="flashcard-selection" data-text="${attr(text)}">Karteikarte</button><button data-action="polaris-selection" data-text="${attr(text)}">Polaris</button>`;
+    tools.innerHTML = `<button data-action="reading-selection" data-text="${attr(text)}">Lesenotiz</button><button data-action="translate-selection" data-text="${attr(text)}">Übersetzen</button><button data-action="flashcard-selection" data-text="${attr(text)}">Karteikarte</button><button data-action="polaris-selection" data-text="${attr(text)}">Polaris</button>`;
     document.body.appendChild(tools);
   }
 
@@ -1969,9 +2237,10 @@
 
   async function handlePolarisCommand(command) {
     const value = String(command || "").trim();
+    const noteMatch = value.match(/^(?:neue\s+)?notiz\s*:\s*(.+)$/i);
+    if (noteMatch) { closeOverlay(); openShortnote(noteMatch[1].trim()); return; }
     const patterns = [
       { re:/^(?:neue\s+)?aufgabe\s*:\s*(.+)$/i, collection:"tasks", label:"Aufgabe" },
-      { re:/^(?:neue\s+)?notiz\s*:\s*(.+)$/i, collection:"notes", label:"Notiz" },
       { re:/^(?:neues\s+)?projekt\s*:\s*(.+)$/i, collection:"projects", label:"Projekt" },
       { re:/^(?:neues\s+)?konzept\s*:\s*(.+)$/i, collection:"concepts", label:"Konzept" }
     ];
@@ -2000,7 +2269,98 @@
       catch (error) { console.warn("[Tablet-Modul submit]", mod.key, error); }
       if (handled) return;
     }
-    if (type === "entity") {
+    if (type === "note") {
+      const existingId = form.dataset.id || "";
+      const noteClass = String(data.get("noteClass") || "general");
+      const source = {
+        app: form.dataset.sourceApp || "noteflow",
+        entityType: form.dataset.sourceType || null,
+        entityId: form.dataset.sourceId || null,
+        label: form.dataset.sourceLabel || "Noteflow",
+        route: form.dataset.sourceRoute || "#/notes"
+      };
+      const tags = Notes.normalizeTags(data.get("tags"), noteTags());
+      try {
+        const id = await saveCanonicalNote({
+          noteClass,
+          title: String(data.get("title") || "").trim(),
+          content: String(data.get("content") || "").trim(),
+          description: String(data.get("content") || "").trim(),
+          tags,
+          notebookId: String(data.get("notebookId") || "") || null,
+          source,
+          readingKind: noteClass === "reading" ? String(data.get("readingKind") || "note") : undefined,
+          learningKind: noteClass === "learning" ? String(data.get("learningKind") || "merksatz") : undefined
+        }, existingId);
+        closeOverlay(); noteSavedToast(id, existingId ? "Notiz aktualisiert" : "In Noteflow gespeichert");
+      } catch (error) { toast("Notiz nicht gespeichert", error.message, "error"); }
+    } else if (type === "idea") {
+      const category = String(data.get("category") || "").trim();
+      const content = String(data.get("idea") || "").trim();
+      if (!category || !content) { toast("Kategorie und Idee fehlen", "Beide Angaben sind erforderlich.", "error"); return; }
+      const id = Core.makeId("idea");
+      try {
+        await saveCanonicalNote({
+          id,
+          noteClass: "idea",
+          content,
+          tags: [category],
+          notebookId: null,
+          source: { app: "ideas", entityType: "idea", entityId: id, label: category, route: "#/ideas" },
+          dedupeKey: `ideas:${id}`
+        });
+        closeOverlay(); noteSavedToast(id, "Idee in der Inbox gespeichert");
+      } catch (error) { toast("Idee nicht gespeichert", error.message, "error"); }
+    } else if (type === "book") {
+      const existingId = form.dataset.id || "";
+      const title = String(data.get("title") || "").trim();
+      if (!title) { toast("Titel fehlt", "Ein Buchtitel ist die einzige Pflichtangabe.", "error"); return; }
+      const id = existingId || Core.makeId("book");
+      const existing = existingId ? asMap(state.payload.entities.books)[existingId] : null;
+      const changedFields = {
+        title,
+        author: String(data.get("author") || "").trim(),
+        status: Notes.normalizeBookStatus(data.get("status")),
+        isbn: String(data.get("isbn") || "").trim(),
+        totalPages: Number(data.get("totalPages")) || null,
+        fileUrl: String(data.get("fileUrl") || "").trim(),
+        updatedAt: new Date().toISOString()
+      };
+      /* Beim Ergänzen von Metadaten nur diese Felder patchen. Annotationen,
+         Leseposition und Notiz-Verknüpfungen eines parallel schreibenden
+         Readers dürfen nie von einem älteren Komplettobjekt überschrieben
+         werden. */
+      const patch = existing ? changedFields : Notes.normalizeBook({ id, ...changedFields, createdAt:new Date().toISOString() }, id);
+      closeOverlay();
+      await executeOperation(makeOperation("entity", existing ? "update" : "create", "books", id, patch));
+      state.selectedBookId = id; state.selectedDocId = null; render();
+      toast(existing ? "Buch ergänzt" : "Buch registriert", title, "ok");
+    } else if (type === "shortnote") {
+      const shortType = String(data.get("shortType") || "note");
+      const content = String(data.get("content") || "").trim();
+      if (!content) { toast("Text fehlt", "Bitte gib einen Inhalt ein.", "error"); return; }
+      if (shortType === "message") {
+        const localValue = String(data.get("deliverAt") || "");
+        const date = new Date(localValue);
+        if (!localValue || Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) { toast("Zustellzeitpunkt ungültig", "Wähle einen Zeitpunkt in der Zukunft.", "error"); return; }
+        const id = Core.makeId("message");
+        closeOverlay();
+        await executeOperation(makeOperation("entity", "create", "scheduledMessages", id, {
+          title: Notes.titleFromContent(content, "Mitteilung"), content, deliverAt: date.toISOString(),
+          priority: "normal", isDelivered: false, isRead: false, isPinned: false,
+          recurrence: "none", sourceType: "tablet-shortnote"
+        }));
+        toast("Mitteilung geplant", `Zustellung ${formatDate(date, { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}`, "ok");
+      } else {
+        const tags = Notes.normalizeTags(data.get("tags"), noteTags());
+        if (!tags.length) { toast("Schlagwort fehlt", "Wähle oder erstelle eine Kategorie.", "error"); return; }
+        try {
+          const id = await saveCanonicalNote({ noteClass:"short", content, tags, notebookId:null,
+            source:{ app:"shortnote", entityType:"capture", entityId:null, label:"Shortnote", route:"#/notes" } });
+          closeOverlay(); noteSavedToast(id, "Kurze Notiz gespeichert");
+        } catch (error) { toast("Notiz nicht gespeichert", error.message, "error"); }
+      }
+    } else if (type === "entity") {
       const name = form.dataset.collection;
       const existingId = form.dataset.id;
       const id = existingId || Core.makeId(name.slice(0,-1));
@@ -2015,6 +2375,8 @@
       const name = form.dataset.collection;
       const title = String(data.get("title")||"").trim();
       if (!name || !title || !COLLECTION_CONFIG[name]) return;
+      if (name === "notes") { openNoteForm({ content: title }); return; }
+      if (name === "ideas") { openIdeaForm(); return; }
       const input = form.querySelector("[data-quickadd]");
       if (input) input.value = "";
       await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),{ title, description:"", status:"open", source:"tablet-quick-add" }),{silent:true});
@@ -2084,7 +2446,10 @@
 
   async function handleClick(event) {
     const button = event.target.closest("[data-action]");
-    if (!button) return;
+    if (!button) {
+      if (!event.target.closest("[data-tag-editor]")) document.querySelectorAll("[data-tag-suggestions]").forEach((menu) => { menu.hidden = true; });
+      return;
+    }
     const action = button.dataset.action;
     // Tablet-Module duerfen eigene Aktionen zuerst behandeln.
     for (const mod of tabletModules()) {
@@ -2113,8 +2478,79 @@
       state.settings.theme = next; saveJson(LOCAL_KEYS.settings,state.settings); applyTheme(next); return;
     }
     if (action === "workspace") { window.QuantusTabletWorkspace?.open?.(); return; }
-    if (action === "new-entity") { openEntityForm(button.dataset.collection); return; }
-    if (action === "edit-entity") { openEntityForm(button.dataset.collection,button.dataset.id); return; }
+    if (action === "open-shortnote") { openShortnote(); return; }
+    if (action === "new-note") { openNoteForm(); return; }
+    if (action === "new-idea") { openIdeaForm(); return; }
+    if (action === "edit-note") { openNoteForm({ id: button.dataset.id }); return; }
+    if (action === "open-saved-note") { state.noteFilter = { mode:"all", value:"" }; closeOverlay(); go("notes"); setTimeout(() => openNoteForm({ id:button.dataset.id }), 80); return; }
+    if (action === "register-book") { openBookForm(); return; }
+    if (action === "edit-book") { openBookForm(button.dataset.id); return; }
+    if (action === "open-book") { state.selectedBookId = button.dataset.id; state.selectedDocId = null; if (state.route !== "reading") go("reading"); else render(); return; }
+    if (action === "reading-note") {
+      const book = collection("books").find((item) => item.id === button.dataset.id); if (!book) return;
+      openNoteForm({ noteClass:"reading", lockClass:true, tags:[book.title], source:{ app:"readinghub", entityType:"book", entityId:book.id, label:book.title, route:"#/reading" } }); return;
+    }
+    if (action === "reading-document-note") {
+      const doc = asMap(state.driveDocs)[button.dataset.id]; if (!doc) return;
+      const title = doc.titel_final || doc.dateiname || "Dokument";
+      openNoteForm({ noteClass:"reading", lockClass:true, tags:[title], source:{ app:"readinghub", entityType:"document", entityId:button.dataset.id, label:title, route:"#/reading" } }); return;
+    }
+    if (action === "calendar-note") {
+      const eventItem = collection("calendarEvents").find((item) => item.id === button.dataset.id)
+        || collection("meetings").find((item) => item.id === button.dataset.id);
+      if (!eventItem) return;
+      const label = itemTitle(eventItem, "Termin");
+      openNoteForm({ noteClass:"research", lockClass:true, content:eventItem.description || "", tags:[label],
+        source:{ app:"calendar", entityType:"event", entityId:eventItem.id, label, route:"#/calendar" } }); return;
+    }
+    if (action === "habit-note") {
+      const habit = activeHabits().find((item) => item.id === button.dataset.id); if (!habit) return;
+      const label = habit.name || habit.title || "Gewohnheit";
+      openNoteForm({ noteClass:"learning", lockClass:true, learningKind:"erklaerung", tags:[label],
+        source:{ app:"habits", entityType:"habit", entityId:habit.id, label, route:"#/habits" } }); return;
+    }
+    if (action === "report-note") {
+      const day = localDateKey();
+      openNoteForm({ noteClass:"research", lockClass:true, tags:["Reports"],
+        source:{ app:"reports", entityType:"snapshot", entityId:day, label:`Bericht ${formatDate(day)}`, route:"#/reports" } }); return;
+    }
+    if (action === "context-note") { openContextNote(button.dataset.collection, button.dataset.id, button.dataset.noteClass); return; }
+    if (action === "note-filter") { state.noteFilter = { mode:button.dataset.mode || "all", value:button.dataset.value || "" }; render(); return; }
+    if (action === "note-source") {
+      const note = collection("notes").find((item) => item.id === button.dataset.id); if (!note) return;
+      if (!noteSourceExists(note)) { toast("Quelle nicht mehr verfügbar", "Die Notiz bleibt in Noteflow erhalten.", "error"); return; }
+      const source = sourceOf(note);
+      if (source.app === "readinghub") { state.selectedBookId = source.entityType === "book" ? source.entityId : null; state.selectedDocId = source.entityType === "document" ? source.entityId : null; go("reading"); return; }
+      if (source.app === "ideas") { go("ideas"); return; }
+      if (source.app === "articles") { go("knowledge"); return; }
+      const route = String(source.route || `#/${source.app}`).replace(/^#\/?/, "").split(/[/?]/)[0];
+      if (ROUTE_TITLES[route]) go(route); else toast("Quelle", source.label || source.app, "ok");
+      return;
+    }
+    if (action === "add-tag-suggestion") { addEditorTag(button.closest("[data-tag-editor]"), button.dataset.tag); return; }
+    if (action === "remove-tag") {
+      const editor = button.closest("[data-tag-editor]");
+      updateTagEditor(editor, tagEditorValues(editor).filter((tag) => tag.toLocaleLowerCase("de-CH") !== String(button.dataset.tag || "").toLocaleLowerCase("de-CH")));
+      return;
+    }
+    if (action === "shortnote-type") {
+      const form = button.closest("form"), type = button.value;
+      form && form.querySelectorAll("[data-shortnote-section]").forEach((section) => { section.hidden = section.dataset.shortnoteSection !== type; });
+      return;
+    }
+    if (action === "new-entity") {
+      if (button.dataset.collection === "notes") { openNoteForm(); return; }
+      if (button.dataset.collection === "ideas") { openIdeaForm(); return; }
+      openEntityForm(button.dataset.collection); return;
+    }
+    if (action === "edit-entity") {
+      if (button.dataset.collection === "notes") { openNoteForm({ id:button.dataset.id }); return; }
+      if (button.dataset.collection === "ideas") {
+        const idea = asMap(state.payload.entities.ideas)[button.dataset.id];
+        if (idea && idea.noteId) { openNoteForm({ id:idea.noteId }); return; }
+      }
+      openEntityForm(button.dataset.collection,button.dataset.id); return;
+    }
     if (action === "delete-entity") {
       if (!confirm("Diesen Eintrag ausblenden? Er wird als gelöscht markiert und kann nicht versehentlich andere Quantus-Daten entfernen.")) return;
       const deletedCollection = button.dataset.collection, deletedId = button.dataset.id;
@@ -2142,7 +2578,7 @@
       const source = collection(name).find((item) => item.id === button.dataset.id);
       if (!source || !COLLECTION_CONFIG[name]) return;
       const patch = { ...source };
-      ["id","createdAt","updatedAt","deletedAt","completedAt"].forEach((key) => delete patch[key]);
+      ["id","createdAt","updatedAt","deletedAt","completedAt","dedupeKey"].forEach((key) => delete patch[key]);
       patch.title = `${itemTitle(source, COLLECTION_CONFIG[name].label)} (Kopie)`;
       if (isDone(source)) patch.status = "open";
       await executeOperation(makeOperation("entity","create",name,Core.makeId(name.slice(0,-1)),patch),{silent:true});
@@ -2241,13 +2677,22 @@
       }
       render(); return;
     }
+    if (action === "briefing-note") {
+      const day = button.dataset.tag || state.dbTag || localDateKey();
+      openNoteForm({ noteClass:"learning", lockClass:true, tags:["Daily Briefing"], source:{ app:"briefings", entityType:"day", entityId:day, label:`Daily Briefing ${formatDate(day)}`, route:"#/daily" } }); return;
+    }
     if (action === "db-toggle-goal") {
       await executeOperation(makeOperation("briefing","goal-toggle",null,button.dataset.id,
         { date: state.dbTag || localDateKey() }),{silent:true}); return;
     }
     if (action === "new-flashcard") { openFlashcardForm(); return; }
     if (action === "edit-flashcard") { openFlashcardForm(button.dataset.id); return; }
-    if (action === "open-doc") { state.selectedDocId=button.dataset.id; if (state.route !== "reading") go("reading"); else render(); return; }
+    if (action === "learning-card-note") {
+      const card = asArray(state.payload.recallLabData.cards).find((item) => item && item.id === button.dataset.id); if (!card) return;
+      const label = card.deckId || "Recall Lab";
+      openNoteForm({ noteClass:"learning", lockClass:true, content:[card.front, card.back].filter(Boolean).join("\n\n"), tags:[label], source:{ app:"recalllab", entityType:"card", entityId:card.id, label, route:"#/learning" } }); return;
+    }
+    if (action === "open-doc") { state.selectedDocId=button.dataset.id; state.selectedBookId=null; if (state.route !== "reading") go("reading"); else render(); return; }
     if (action === "external") { openExternal(button.dataset.path); return; }
     if (action === "apps-view") { state.appsView = button.dataset.view === "list" ? "list" : "grid"; render(); return; }
     if (action === "apps-arrange") { go("home"); window.QuantusTabletSpringboard?.startArrange?.(); return; }
@@ -2267,18 +2712,51 @@
     if (action === "external-url") { openExternalUrl(button.dataset.url); return; }
     if (action === "external-translate") { openExternalUrl(`https://translate.google.com/?sl=auto&tl=de&text=${encodeURIComponent(button.dataset.text || "")}`); return; }
     if (action === "translate-selection") { await translateSelection(button.dataset.text || ""); return; }
+    if (action === "reading-selection") {
+      const text = button.dataset.text || "";
+      const book = state.selectedBookId && collection("books").find((item) => item.id === state.selectedBookId);
+      const doc = state.selectedDocId && asMap(state.driveDocs)[state.selectedDocId];
+      const label = book && book.title || doc && (doc.titel_final || doc.dateiname) || "Leseauswahl";
+      openNoteForm({ noteClass:"reading", lockClass:true, content:text, tags:[label], source:{ app:"readinghub", entityType:book ? "book" : "document", entityId:book && book.id || state.selectedDocId || null, label, route:"#/reading" } }); return;
+    }
     if (action === "flashcard-selection") { openFlashcardForm(null,{front:button.dataset.text||"",back:"",source:"Markierung aus Quantus Drive"}); return; }
     if (action === "polaris-selection") { openPolarisSheet(`Erkläre mir diesen Text: ${button.dataset.text||""}`); return; }
     if (action === "polaris-quick") { const input=overlayRoot.querySelector('[name="command"]')||document.querySelector('[name="command"]'); if(input){input.value=button.dataset.command||"";input.focus();} return; }
-    if (action === "search-result") { closeOverlay(); go(COLLECTION_CONFIG[button.dataset.collection].route); setTimeout(()=>openEntityForm(button.dataset.collection,button.dataset.id),120); return; }
+    if (action === "search-result") { closeOverlay(); go(COLLECTION_CONFIG[button.dataset.collection].route); setTimeout(()=>button.dataset.collection === "notes" ? openNoteForm({ id:button.dataset.id }) : openEntityForm(button.dataset.collection,button.dataset.id),120); return; }
     if (action === "split-with") { state.splitLeft=button.dataset.route||state.route; state.splitRight=state.splitLeft==="notes"?"reading":"notes"; go("split"); return; }
   }
 
   document.addEventListener("click", handleClick);
-  document.addEventListener("submit", (event) => { const form=event.target.closest("form[data-form]"); if(!form)return; event.preventDefault(); handleSubmit(form); });
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("form[data-form]");
+    if (!form) return;
+    event.preventDefault();
+    // Doppeltipps und erneut ausgelöste Offline-Submits verwenden denselben
+    // laufenden Vorgang, statt zwei Notiz-IDs zu erzeugen.
+    if (form.dataset.submitting === "true") return;
+    form.dataset.submitting = "true";
+    const submitters = Array.from(form.querySelectorAll('button[type="submit"],input[type="submit"]'));
+    submitters.forEach((button) => { button.disabled = true; });
+    Promise.resolve(handleSubmit(form)).catch((error) => {
+      toast("Nicht gespeichert", error && error.message || String(error), "error");
+    }).finally(() => {
+      if (!form.isConnected) return;
+      delete form.dataset.submitting;
+      submitters.forEach((button) => { button.disabled = false; });
+    });
+  });
   let searchDebounce = null;
   let draftDebounce = null;
   document.addEventListener("input", (event) => {
+    if (event.target.matches("[data-tag-autocomplete]")) {
+      const input = event.target, editor = input.closest("[data-tag-editor]"), menu = editor && editor.querySelector("[data-tag-suggestions]");
+      if (!menu) return;
+      const query = input.value.trim();
+      const suggestions = Notes.filterTagSuggestions(noteTags(), query, tagEditorValues(editor), 8);
+      menu.innerHTML = suggestions.map((tag) => `<button type="button" data-action="add-tag-suggestion" data-tag="${attr(tag)}" role="option">#${esc(tag)}</button>`).join("") + (query && !suggestions.some((tag) => tag.toLocaleLowerCase("de-CH") === query.toLocaleLowerCase("de-CH")) ? `<button type="button" data-action="add-tag-suggestion" data-tag="${attr(query)}" role="option">＋ #${esc(query)} neu</button>` : "");
+      menu.hidden = !query && !suggestions.length;
+      input.setAttribute("aria-expanded", menu.hidden ? "false" : "true");
+    }
     if (event.target.matches('[data-action="filter-collection"]')) {
       const value=event.target.value;
       state.search=value;
@@ -2321,6 +2799,14 @@
       event.target.value = "";
       return;
     }
+    const noteFilterSelect = event.target.closest('[data-action="note-filter-select"]');
+    if (noteFilterSelect) { state.noteFilter = noteFilterSelect.value ? { mode:noteFilterSelect.dataset.mode, value:noteFilterSelect.value } : { mode:"all", value:"" }; render(); return; }
+    const classSelect = event.target.closest('[data-action="note-class-select"]');
+    if (classSelect) {
+      const form = classSelect.closest("form");
+      form && form.querySelectorAll("[data-note-subtype]").forEach((section) => { section.hidden = section.dataset.noteSubtype !== classSelect.value; });
+      return;
+    }
     const sortSelect=event.target.closest('[data-action="sort-collection"]');
     if (sortSelect) { state.sort=sortSelect.value; render(); return; }
     const select=event.target.closest('[data-action="split-select"]'); if(!select)return;
@@ -2334,6 +2820,32 @@
   });
   const SHORTCUT_ROUTES = ["home","daily","tasks","projects","notes","calendar","learning","habits","workspace"];
   document.addEventListener("keydown", (event) => {
+    const suggestion = event.target.closest && event.target.closest('[data-action="add-tag-suggestion"]');
+    if (suggestion) {
+      const editor = suggestion.closest("[data-tag-editor]"), menu = suggestion.closest("[data-tag-suggestions]");
+      const buttons = menu ? Array.from(menu.querySelectorAll("button")) : [];
+      const index = buttons.indexOf(suggestion);
+      if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation();
+        if (menu) menu.hidden = true;
+        const input = editor && editor.querySelector("[data-tag-autocomplete]");
+        if (input) { input.setAttribute("aria-expanded", "false"); input.focus(); }
+        return;
+      }
+      if (event.key === "ArrowDown" && buttons[index + 1]) { event.preventDefault(); buttons[index + 1].focus(); return; }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (buttons[index - 1]) buttons[index - 1].focus();
+        else editor && editor.querySelector("[data-tag-autocomplete]")?.focus();
+        return;
+      }
+    }
+    if (event.target.matches && event.target.matches("[data-tag-autocomplete]")) {
+      const input = event.target, editor = input.closest("[data-tag-editor]"), menu = editor && editor.querySelector("[data-tag-suggestions]");
+      if (event.key === "Enter" && input.value.trim()) { event.preventDefault(); addEditorTag(editor, input.value); return; }
+      if (event.key === "ArrowDown" && menu && !menu.hidden) { const first = menu.querySelector("button"); if (first) { event.preventDefault(); first.focus(); } return; }
+      if (event.key === "Escape" && menu && !menu.hidden) { event.preventDefault(); event.stopPropagation(); menu.hidden = true; input.setAttribute("aria-expanded", "false"); return; }
+    }
     if(event.key==="Escape")closeOverlay();
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();openSearch();}
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="p"){event.preventDefault();openPolarisSheet();}
@@ -2352,7 +2864,12 @@
       /^(input|textarea|select)$/i.test(fokus && fokus.tagName || "") ||
       Boolean(fokus && fokus.isContentEditable);
     // Alt+N: neuer Eintrag passend zur aktuellen Ansicht.
-    if(event.altKey && !typing && event.key.toLowerCase()==="n"){event.preventDefault();openEntityForm(COLLECTION_CONFIG[state.route]?state.route:"tasks");}
+    if(event.altKey && !typing && event.key.toLowerCase()==="n"){
+      event.preventDefault();
+      if (state.route === "notes") openNoteForm();
+      else if (state.route === "ideas") openIdeaForm();
+      else openEntityForm(COLLECTION_CONFIG[state.route]?state.route:"tasks");
+    }
     // Alt+1..9: direkt zwischen den Hauptansichten wechseln.
     if(event.altKey && !typing && /^[1-9]$/.test(event.key)){const route=SHORTCUT_ROUTES[Number(event.key)-1];if(route){event.preventDefault();go(route);}}
   });
@@ -2390,7 +2907,7 @@
   }
 
   window.__quantusTablet = {
-    state, executeOperation, makeOperation, collection, go, toast, Core, APP_STORE_PATH, RTDB_URL,
+    state, executeOperation, makeOperation, collection, go, toast, Core, Notes, saveCanonicalNote, openNoteForm, openContextNote, openShortnote, APP_STORE_PATH, RTDB_URL,
     getStorage: () => storage,
     getDatabase: () => db,
     // Bausteine fuer die Tablet-Module (Homebildschirm, Mail, FlowerTech)
