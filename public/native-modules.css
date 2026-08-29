@@ -180,3 +180,8 @@
 .nm-richtext h1, .nm-richtext h2, .nm-richtext h3 { font-family: Georgia, serif; line-height: 1.3; }
 .nm-richtext ul, .nm-richtext ol { margin: 0 0 12px; padding-left: 22px; }
 .nm-richtext img { max-width: 100%; height: auto; }
+
+/* Der PDF-Betrachter fuellt den Lesebereich vollstaendig. */
+.nm-pdf-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.nm-pdf-host .pdfv { flex: 1; min-height: 0; }
+.pdfv-platz { flex: 1; display: grid; place-items: center; }

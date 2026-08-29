@@ -73,6 +73,54 @@ die Verpackung, nicht den Inhalt. Das ist behoben:
 
 Das Kompendium (rund 1,8 MB) wird erst geladen, wenn die BM-App offen ist.
 
+## PDF lesen
+
+Der Betrachter war ein blosses `<iframe>`. Auf iPadOS zeigt Safari ein PDF im
+iframe nur als **Vorschau**: erste Seite, kein Blaettern, und `#view` wird
+ignoriert. Bedienung gab es keine.
+
+Die Seiten werden jetzt selbst gezeichnet (`pdf-viewer.js`, PDF.js auf
+Canvas). Damit gehoert die Bedienung der App:
+
+- fortlaufende Seiten, Blaettern und Sprung zu einer Seitenzahl
+- Zoom, Einpassen auf die Breite und auf die ganze Seite, Drehen
+- Volltextsuche mit Sprung zu den Seiten mit Treffern
+- Vollbild, und das Original weiterhin einen Tipp entfernt
+
+Gezeichnet wird nur, was ins Blickfeld kommt — ein Dokument mit dreihundert
+Seiten legt das Tablet sonst lahm. Alle Blaetter bekommen aber sofort ihre
+geschaetzte Groesse, damit die Rollhoehe stimmt.
+
+**Rueckfall.** PDF.js holt die Datei per `fetch`. Die Dokumente liegen in
+Firebase Storage, also auf fremder Herkunft — ohne dort gesetzte CORS-Regel
+scheitert das, waehrend ein iframe dasselbe Dokument anstandslos zeigt. Auch
+offline fehlt PDF.js (es kommt vom CDN). In beiden Faellen faellt der
+Betrachter auf das iframe zurueck **und sagt, warum**. Wer PDF.js selbst
+ausliefern will, setzt vor `pdf-viewer.js` ein
+`window.QUANTUS_PDFJS_BASE = "/mein/verzeichnis/"`.
+
+## Morgenbriefing
+
+Das Briefing hatte kein Symbol auf dem Homebildschirm: die Route stand in
+keiner Seite des Springboards, und `normaliseLayout` haengt unbekannte Apps
+hinten an die **letzte** Seite an — es lag also auf Seite vier, hinter allem.
+Und es war nur ein zweiter Name fuer „Heute".
+
+Jetzt ist es eine eigene App (`briefing-app.js`) an **erster Stelle** der
+ersten Seite: der Tag in einer Zeile, der naechste Termin, die Tagesziele zum
+Schreiben, Ueberfaelliges vor Faelligem, Routinen zum Abhaken, ein
+Leitgedanke, Gedanken und die Tagesnotiz. Kurz und in der Reihenfolge, in der
+man morgens hinsieht.
+
+Gerechnet wird mit `briefingModell()` — demselben Modell wie „Heute" und wie
+der Kasten auf dem Homebildschirm. Die vollstaendige Fassung mit allen
+siebzehn Abschnitten bleibt unveraendert unter „Heute" und ist von hier einen
+Tipp entfernt.
+
+Unter Einstellungen laesst sich waehlen, **womit die App aufstartet**:
+Homebildschirm, Morgenbriefing oder Heute. Eine mitgegebene Adresse wird davon
+nie ueberschrieben.
+
 ## Sticky Boards
 
 Boards haengen in Quantus an einem Element — an einer Aufgabe, einem Projekt,
@@ -126,6 +174,8 @@ Ansicht hat, und sagt es, falls einmal eine fehlt.
 - durchsuchbarer App-Bildschirm mit Zuletzt-benutzt, Gruppen und Raster/Liste
 - Sticky Boards als eigene App: alle Boards auf einen Blick, eines im Vollbild
 - BM Vorbereitung mit Kompendium, Leitner-Wiederholungen und Fortschritt
+- eigener PDF-Betrachter mit Blaettern, Zoom, Suche, Drehen und Vollbild
+- Morgenbriefing als eigene App; der Startbildschirm ist waehlbar
 - globales Tablet Canvas in jeder App und über die Hauptnavigation
 - handschriftliche Notizen mit Apple Pencil, Stift, Finger oder Maus
 - Stift- und Marker-Modus mit Farb-Schnellwahl und variabler Strichstärke

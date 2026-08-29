@@ -16,7 +16,7 @@ const nativeModules = fs.readFileSync(path.join(root, "native-modules.js"), "utf
 for (const id of ["app", "main", "overlayRoot", "syncDot", "accountButton"]) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
 }
-for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "native-modules.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "native-modules.js", "bm-app.js", "bm-app.css", "sticky-app.js", "sticky-app.css", "app.js", "icon.svg", "manifest.webmanifest"]) {
+for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "native-modules.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "native-modules.js", "bm-app.js", "bm-app.css", "sticky-app.js", "sticky-app.css", "pdf-viewer.js", "pdf-viewer.css", "briefing-app.js", "briefing-app.css", "app.js", "icon.svg", "manifest.webmanifest"]) {
   assert.equal(fs.existsSync(path.join(root, file)), true, `missing ${file}`);
   assert.match(serviceWorker + html, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${file} is not referenced`);
 }

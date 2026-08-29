@@ -210,8 +210,24 @@ Object.keys(inhalte).forEach((route) => {
   });
 });
 
-// Das PDF wird wirklich angezeigt, nicht nur verlinkt.
-ok(/<iframe[^>]+example\.ch\/b\.pdf/.test(modul.render("pdfeditor")), "der PDF-Betrachter zeigt das Dokument nicht");
+/*
+ * Das PDF wird wirklich angezeigt, nicht nur verlinkt.
+ *
+ * Hier stand die Pruefung auf ein <iframe> mit der Adresse. Genau das war
+ * aber der Befund des Nutzers ("pdf reader noch sehr eingeschraenkt"): auf
+ * iPadOS zeigt Safari ein PDF im iframe nur als Vorschau — erste Seite, kein
+ * Blaettern — und #view wird ignoriert. Gerendert wird jetzt mit einem
+ * eigenen Betrachter (pdf-viewer.js), der nach dem Zeichnen in den
+ * Behaelter eingehaengt wird. Geprueft wird deshalb der Behaelter samt
+ * Adresse, nicht mehr das iframe.
+ */
+{
+  const pdfAnsicht = modul.render("pdfeditor");
+  ok(/data-nm-pdf="[^"]*example\.ch\/b\.pdf"/.test(pdfAnsicht),
+    "der PDF-Behaelter traegt die Adresse des Dokuments nicht");
+  ok(!/<iframe/.test(pdfAnsicht),
+    "das PDF steckt wieder in einem iframe — auf iPadOS waere nur die erste Seite sichtbar");
+}
 // Ein verschlossener Brief gibt seinen Text nicht preis.
 ok(!modul.render("journal").includes("Lieber Laurin"),
   "ein Brief mit kuenftigem Zustelldatum zeigt seinen Inhalt trotzdem");

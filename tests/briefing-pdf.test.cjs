@@ -68,13 +68,42 @@ function regel(quelle, selektor) {
 {
   const k = ohneKommentare(app);
 
-  ok(!/#toolbar=0/.test(k),
-    "DER BEFUND: das PDF wird weiterhin mit #toolbar=0 eingebettet — kein Zoom, keine Seitenzahl, keine Suche");
+  /*
+   * Hier stand die Pruefung auf das eingebettete iframe: kein #toolbar=0,
+   * dafuer #view=FitH und allowfullscreen. Das war die richtige Antwort auf
+   * den damaligen Befund — aber der Nutzer meldete danach "pdf reader noch
+   * sehr eingeschraenkt", und der Grund liegt tiefer: auf iPadOS zeigt Safari
+   * ein PDF im iframe nur als VORSCHAU. Erste Seite, kein Blaettern, und
+   * #view wird ignoriert. Ein besser eingestelltes iframe half dort nichts.
+   *
+   * Gerendert wird jetzt mit einem eigenen Betrachter (pdf-viewer.js), der
+   * die Seiten selbst auf Canvas zeichnet. Geprueft wird deshalb, dass das
+   * PDF in dessen Behaelter landet — und NICHT mehr in einem iframe.
+   */
+  ok(!/#toolbar=0/.test(k), "das PDF wird wieder mit abgeschalteter Werkzeugleiste eingebettet");
   ok(!/navpanes=0/.test(k), "die Seitenleiste des Betrachters ist weiterhin abgeschaltet");
-  ok(/#view=FitH/.test(k), "das PDF wird nicht auf die Breite eingepasst geoeffnet");
-  ok(/class="reader-pdf"/.test(k),
-    "DER BEFUND: das PDF steckt weiterhin in .reader-content — dessen Lesepolster verkleinert es");
-  ok(/allowfullscreen/.test(k), "der eingebettete Betrachter darf nicht ins Vollbild");
+  ok(/data-nm-pdf=/.test(k), "das PDF landet nicht im Behaelter des eigenen Betrachters");
+  ok(!/<iframe[^>]*\$\{attr\(url\)\}/.test(k) && !/#view=FitH/.test(k),
+    "DER BEFUND: das PDF steckt wieder in einem iframe — auf iPadOS bliebe es bei der ersten Seite");
+  // Der Betrachter selbst muss die Bedienung mitbringen, die das iframe nie hatte.
+  const viewer = ohneKommentare(read("pdf-viewer.js"));
+  for (const [muster, was] of [
+    [/data-pdfv="prev"/, "Blaettern zurueck"], [/data-pdfv="next"/, "Blaettern vorwaerts"],
+    [/data-pdfv="seitenfeld"/, "Sprung zu einer Seite"], [/data-pdfv="zoom-ein"/, "Zoom"],
+    [/data-pdfv="fit-breite"/, "Einpassen auf die Breite"], [/data-pdfv="fit-seite"/, "ganze Seite"],
+    [/data-pdfv="drehen"/, "Drehen"], [/data-pdfv="suchfeld"/, "Suche im Dokument"],
+    [/data-pdfv="vollbild"/, "Vollbild"]
+  ]) {
+    ok(muster.test(viewer), `dem PDF-Betrachter fehlt ${was}`);
+  }
+  // Beim Oeffnen wird auf die Breite eingepasst — sonst steht die Seite
+  // winzig oder ragt hinaus.
+  ok(/modus: "breite"/.test(viewer), "das PDF wird nicht auf die Breite eingepasst geoeffnet");
+  // Und der Rueckfall bleibt: ohne Netz oder ohne CORS muss das Dokument
+  // trotzdem sichtbar sein, mit einem Wort dazu, warum es hier weniger kann.
+  ok(/function rueckfall/.test(viewer) && /<iframe/.test(viewer),
+    "es fehlt der Rueckfall auf den Betrachter des Browsers");
+  ok(/pdfv-hinweis/.test(viewer), "der Rueckfall sagt nicht, warum er da ist");
 
   // Der Textzweig bleibt, wie er war — Fliesstext BRAUCHT das Polster.
   ok(/class="reader-content" data-reader="true"><article>/.test(k),
@@ -91,21 +120,22 @@ function regel(quelle, selektor) {
 
 // ═══ 3. Das CSS gibt dem PDF wirklich Flaeche ══════════════════════════
 {
-  const pdf = regel(css, ".reader-pdf");
-  ok(pdf != null, ".reader-pdf hat keine Regel");
+  const pdf = regel(css, ".nm-pdf-host");
+  ok(pdf != null, ".nm-pdf-host hat keine Regel");
   if (pdf) {
-    ok(/height:\s*calc\(var\(--content-h\)/.test(pdf), `.reader-pdf bekommt keine Hoehe aus --content-h`);
-    ok(!/padding/.test(pdf), ".reader-pdf hat ein Polster — genau das verkleinerte das PDF vorher");
+    ok(/height:\s*calc\(var\(--content-h\)/.test(pdf), ".nm-pdf-host bekommt keine Hoehe aus --content-h");
+    ok(!/padding/.test(pdf), ".nm-pdf-host hat ein Polster — genau das verkleinerte das PDF vorher");
     ok(/overflow:\s*hidden/.test(pdf),
-      ".reader-pdf scrollt selbst — dann scrollen zwei Ebenen gegeneinander, der Betrachter soll es tun");
+      ".nm-pdf-host scrollt selbst — dann scrollen zwei Ebenen gegeneinander, der Betrachter soll es tun");
   }
-  const frame = regel(css, ".reader-pdf iframe");
-  ok(frame && /height:\s*100%/.test(frame) && /width:\s*100%/.test(frame), "das iframe fuellt den Behaelter nicht");
+  // Die alten iframe-Regeln sind entfallen; sie gestalteten etwas, das es
+  // nicht mehr gibt. Totes CSS behauptet, es sei noch im Spiel.
+  ok(!/\.reader-pdf/.test(css), "es steht noch totes CSS fuer das alte PDF-iframe herum");
 
-  // Der schmale Fall: height:auto liesse das iframe zusammenfallen.
+  // Der schmale Fall: ohne echte Hoehe faellt der Behaelter zusammen.
   const schmal = css.slice(css.indexOf("@media"), css.length);
-  ok(/\.reader-pdf\s*\{[^}]*height:\s*75vh/.test(schmal),
-    "in der Media Query bekommt .reader-pdf keine echte Hoehe — das PDF faellt dort zusammen");
+  ok(/\.nm-pdf-host\s*\{[^}]*height:\s*75vh/.test(schmal),
+    "in der Media Query bekommt .nm-pdf-host keine echte Hoehe — das PDF faellt dort zusammen");
 
   ok(regel(css, ".reading-layout.library-hidden") != null, "das Wegklappen der Bibliothek ist nicht gestaltet");
   ok(/\.reader-panel:fullscreen/.test(css), "im Vollbild bleibt der Rahmen stehen");

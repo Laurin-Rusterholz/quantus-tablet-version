@@ -37,7 +37,7 @@
   const FULL_APP_DEFS = [
     { key: "dashboard", label: "Dashboard", icon: "⌂", tone: "green", fullRoute: "dashboard", group: "Übersicht" },
     { key: "daily", label: "Heute", icon: "☀", tone: "sand", fullRoute: "today", group: "Übersicht" },
-    { key: "dailybriefing", label: "Daily Briefing", icon: "◫", tone: "sand", fullRoute: "dailybriefing", group: "Übersicht" },
+    { key: "dailybriefing", label: "Morgenbriefing", icon: "☀", tone: "sand", fullRoute: "dailybriefing", group: "Übersicht" },
     { key: "tasks", label: "Aufgaben", icon: "✓", tone: "green", fullRoute: "tasks", group: "Planen" },
     { key: "projects", label: "Projekte", icon: "▧", tone: "blue", fullRoute: "projects", group: "Planen" },
     { key: "weekplanning", label: "Wochenplanung", icon: "▤", tone: "blue", fullPath: "nobraine.html", group: "Planen" },
@@ -1198,10 +1198,12 @@
         // PDF: EIGENER Behaelter ohne Lesepolster. Vorher steckte das Dokument
         // in .reader-content mit 24 px oben/unten und bis zu 54 px seitlich —
         // Polster, das ein Fliesstext braucht und ein PDF nur verkleinert.
-        // Und #toolbar=0&navpanes=0 schaltete die Werkzeugleiste des Betrachters
-        // AB: kein Zoom, keine Seitenzahl, keine Suche. Genau das machte das
-        // Lesen unangenehm. Beides ist jetzt umgekehrt.
-        ? `<div class="reader-pdf" data-reader="true"><iframe title="${attr(name)}" src="${attr(url)}#view=FitH" allowfullscreen></iframe></div>`
+        //
+        // Und es stand in einem iframe. Auf iPadOS zeigt Safari ein PDF im
+        // iframe nur als Vorschau: erste Seite, kein Blaettern, #view wird
+        // ignoriert. Gerendert wird deshalb mit dem eigenen Betrachter
+        // (pdf-viewer.js), der nach dem Zeichnen eingehaengt wird.
+        ? `<div class="nm-pdf-host" data-nm-pdf="${attr(url)}" data-nm-pdf-name="${attr(name)}">${window.QuantusPdfViewer ? window.QuantusPdfViewer.placeholder(name) : ""}</div>`
         : `<div class="reader-content" data-reader="true"><article><h1>${esc(name)}</h1><p>${text ? esc(text) : "Für dieses Dokument ist noch kein Textauszug vorhanden. Öffne das Original über den Pfeil oben."}</p></article></div>`}`;
   }
 
@@ -1699,7 +1701,7 @@
   function renderSettings() {
     return `<div class="view">${viewHeader("Einstellungen", "Verbindung, Darstellung und Installation der Tablet-App.", "")}
       <div class="dashboard-grid"><section class="widget span-6"><div class="widget-head"><span class="widget-icon">↔</span><h2>Synchronisation</h2></div><div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Konto</small><strong>${esc(state.user ? (state.user.email || state.user.displayName) : "Nicht angemeldet")}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Offline-Warteschlange</small><strong>${state.pending.length} Änderung(en)</strong></div></div><div class="row-actions" style="margin-top:14px">${state.user ? `<button class="btn" data-action="flush-sync">Jetzt synchronisieren</button><button class="btn danger" data-action="sign-out">Abmelden</button>` : `<button class="btn primary" data-action="sign-in">Mit Google anmelden</button>`}</div></section>
-      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
+      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>Beim Start zeigen</label><select name="startRoute"><option value="home" ${(state.settings.startRoute||"home")==="home"?"selected":""}>Homebildschirm</option><option value="dailybriefing" ${state.settings.startRoute==="dailybriefing"?"selected":""}>Morgenbriefing</option><option value="daily" ${state.settings.startRoute==="daily"?"selected":""}>Heute</option></select></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
       <section class="widget span-6"><div class="widget-head"><span class="widget-icon">▰</span><h2>Speicher und Backup</h2></div>${storageDetails()}<div class="row-actions" style="margin-top:14px"><button class="btn primary" data-action="export-backup">Backup herunterladen</button><button class="btn" data-action="import-backup">Backup einspielen</button><button class="btn" data-action="clear-cache">Lokalen Cache leeren</button></div><input type="file" id="backupFileInput" accept="application/json,.json" style="display:none"></section>
       <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⌨</span><h2>Tastatur-Abkürzungen</h2></div><div class="item-list">${[["Ctrl/Cmd + K","Alles durchsuchen"],["Ctrl/Cmd + P","Polaris öffnen"],["Alt + N","Neuer Eintrag in der aktuellen Ansicht"],["Ctrl/Cmd + S","Snapshot sichern und synchronisieren"],["Alt + 1 bis 9","Zwischen den Hauptansichten wechseln"],["Esc","Dialog schliessen"]].map(([keys,label]) => `<div class="list-item"><span class="badge">${esc(keys)}</span><div class="item-main"><div class="item-title">${esc(label)}</div></div></div>`).join("")}</div></section>
       <section class="widget span-12"><div class="widget-head"><span class="widget-icon">＋</span><h2>Als App installieren</h2></div><p class="muted">Öffne im Browser das Teilen-Menü und wähle „Zum Home-Bildschirm“. Danach startet Quantus Tablet ohne Browserleiste wie eine normale App.</p></section></div></div>`;
@@ -1720,6 +1722,39 @@
 
   let renderedRoute = null;
 
+  /*
+   * DEN PDF-BETRACHTER EINHAENGEN.
+   *
+   * Er baut sein Innenleben selbst auf (Seiten auf Canvas), kann also nicht
+   * aus einer Zeichenkette kommen. Das Einhaengen steht bewusst HIER und
+   * nicht im Modul: mount() eines Moduls laeuft nur fuer dessen eigene Route,
+   * und "reading" gehoert gar keinem Modul — dort waere der Betrachter nie
+   * eingehaengt worden.
+   */
+  let offenesPdf = null;
+  function mountPdfViewer() {
+    const host = main.querySelector("[data-nm-pdf]");
+    if (!host) {
+      // Kein PDF mehr in der Ansicht: das Dokument samt Arbeiter freigeben.
+      if (offenesPdf && window.QuantusPdfViewer) window.QuantusPdfViewer.close();
+      offenesPdf = null;
+      return;
+    }
+    if (!window.QuantusPdfViewer) return;
+    const url = host.dataset.nmPdf;
+    /*
+     * Geoeffnet wird, wenn der Behaelter noch KEINEN Betrachter enthaelt oder
+     * ein anderes Dokument gewaehlt ist. Auf eine blosse Merkvariable zu bauen
+     * waere falsch: jedes Neuzeichnen ersetzt das Innere von #main, der
+     * Betrachter ist damit weg — die Variable zeigte aber weiter auf dieselbe
+     * Adresse und verhinderte das erneute Oeffnen. Zurueck bliebe ein leerer
+     * Kasten, ausgerechnet dann, wenn im Hintergrund neue Daten eintreffen.
+     */
+    if (host.querySelector(".pdfv") && offenesPdf === url) return;
+    offenesPdf = url;
+    window.QuantusPdfViewer.open(host, { url, name: host.dataset.nmPdfName });
+  }
+
   function render() {
     state.route = getRoute();
     viewTitle.textContent = ROUTE_TITLES[state.route] || "Quantus";
@@ -1730,6 +1765,7 @@
     // neuen Seite. Bei reinen Datenaktualisierungen bleibt die Position.
     if (renderedRoute !== state.route) { renderedRoute = state.route; main.scrollTop = 0; }
     updateAccountButton();
+    mountPdfViewer();
     window.QuantusTabletWorkspace?.mountRoute?.();
     const mounted = moduleFor(state.route);
     if (mounted && typeof mounted.mount === "function") {
@@ -2030,6 +2066,7 @@
     } else if (type === "settings") {
       state.settings.aiSyncUrl = String(data.get("aiSyncUrl")||DEFAULT_AI_SYNC_URL).replace(/\/+$/,"");
       state.settings.theme = String(data.get("theme")||"dark");
+      state.settings.startRoute = String(data.get("startRoute")||"home");
       saveJson(LOCAL_KEYS.settings,state.settings);
       applyTheme(state.settings.theme);
       toast("Einstellungen gespeichert", "Die Tablet-App wurde aktualisiert.", "ok");
@@ -2332,6 +2369,19 @@
     // Erst der lokale Snapshot (sofortige Inhalte, auch offline), dann Firebase.
     hydrateFromSnapshot();
     if (!navigator.onLine) setSync("offline", "Keine Internetverbindung – lokaler Datenstand aktiv");
+    /*
+     * Womit die App aufstartet.
+     *
+     * BEFUND (Nutzer: "das morning briefing wird nicht am anfang
+     * angezeigt"): sie begann immer auf dem Homebildschirm. Wer morgens als
+     * Erstes seinen Tag sehen will, musste ihn jedes Mal selbst suchen.
+     * Gesetzt wird das nur, wenn KEINE Adresse mitgegeben ist — ein Link auf
+     * eine bestimmte Ansicht darf davon nie ueberschrieben werden.
+     */
+    const startRoute = state.settings.startRoute;
+    if (startRoute && startRoute !== "home" && !location.hash && ROUTE_TITLES[startRoute]) {
+      location.hash = "#/" + startRoute;
+    }
     state.route=getRoute(); render(); initFirebase();
     // Zurueckgestellte Aenderungen regelmaessig nachschieben, falls ein einzelner
     // Versuch (z. B. direkt nach dem Aufwachen) fehlgeschlagen ist.
