@@ -491,7 +491,12 @@
 
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({
     key: "mail",
-    routes: ["mail", "gmail", "messages"],
+    // "messages" gehoert NICHT hierher: das ist in AI Sync
+    // entities.scheduledMessages — Nachrichten, die man sich selbst auf einen
+    // Zeitpunkt legt. Solange die Route hier stand, oeffnete „Nachrichten"
+    // den Gmail-Posteingang, und der eigentliche Bestand war unerreichbar.
+    // Die native Ansicht dafuer steht in native-modules.js.
+    routes: ["mail", "gmail"],
     render: render,
     mount: mount,
     onAction: onAction,

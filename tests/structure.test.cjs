@@ -8,11 +8,15 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.webmanifes
 const serviceWorker = fs.readFileSync(path.join(root, "sw.js"), "utf8");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const workspace = fs.readFileSync(path.join(root, "tablet-workspace.js"), "utf8");
+const springboard = fs.readFileSync(path.join(root, "springboard.js"), "utf8");
+const mailApp = fs.readFileSync(path.join(root, "mail-app.js"), "utf8");
+const flowertechApp = fs.readFileSync(path.join(root, "flowertech-app.js"), "utf8");
+const nativeModules = fs.readFileSync(path.join(root, "native-modules.js"), "utf8");
 
 for (const id of ["app", "main", "overlayRoot", "syncDot", "accountButton"]) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
 }
-for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "app.js", "icon.svg", "manifest.webmanifest"]) {
+for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "native-modules.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "native-modules.js", "app.js", "icon.svg", "manifest.webmanifest"]) {
   assert.equal(fs.existsSync(path.join(root, file)), true, `missing ${file}`);
   assert.match(serviceWorker + html, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${file} is not referenced`);
 }
@@ -27,16 +31,68 @@ for (const page of ["drive.html", "docstudio.html", "nobraine.html", "bm.html"])
   assert.match(app, new RegExp(`fullPath: ["']${page.replace(".", "\\.")}["']`), `missing full AI Sync page ${page}`);
 }
 
-// The tablet no longer embeds the AI Sync app in an iframe. Every route renders a
-// native tablet view; full desktop modules only open in a separate window.
+// The tablet never embeds the AI Sync app in an iframe. Every route renders a
+// native tablet view.
 assert.doesNotMatch(app, /full-app-frame|fullAppFrame|renderFullApp/, "AI Sync must not be embedded in an iframe anymore");
 assert.doesNotMatch(html, /<iframe[^>]*full-app/, "index.html must not embed a full app iframe");
-for (const fn of ["renderRoute", "renderModule", "renderCalendar", "renderCollectionView", "renderStatistics", "renderReports", "moduleList"]) {
+for (const fn of ["renderRoute", "renderCalendar", "renderCollectionView", "renderStatistics", "renderReports"]) {
   assert.match(app, new RegExp(`function ${fn}\\b`), `missing native renderer ${fn}`);
 }
-// Module pages must surface real data, not just an "open externally" placeholder.
-assert.match(app, /MODULE_COLLECTIONS/, "modules should map to real collections");
-assert.match(app, /recentActivity/, "modules should show recent activity from the payload");
+
+/*
+ * JEDE APP HAT EINE EIGENE TABLET-ANSICHT.
+ *
+ * BEFUND: Module ohne eigene Ansicht landeten in renderModule() — einer
+ * Kachel mit ein paar Kennzahlen und dem Knopf „Separat oeffnen". Auf dem
+ * Tablet hiess das: diese App laesst sich hier gar nicht bedienen, sie
+ * schickt einen in die Desktop-App. Betroffen waren unter anderem
+ * Zeiterfassung, Auslastung, Wochenplanung, Wissensbasis, Thesis, Journal,
+ * Reflecta, Nachrichten, Updates, Massnahmen, Drive, PDF, DocStudio,
+ * Browser, Briefings, Quantus Projekt und Smarter.
+ *
+ * Diese Pruefung haelt fest, dass KEIN Eintrag des App-Katalogs mehr ohne
+ * Ansicht dasteht: entweder rendert app.js die Route selbst, oder ein
+ * Tablet-Modul beansprucht sie.
+ */
+const moduleRoutes = new Set();
+for (const source of [nativeModules, springboard, mailApp, flowertechApp, workspace]) {
+  const block = source.match(/routes:\s*\[([^\]]*)\]/);
+  if (block) block[1].split(",").forEach((entry) => {
+    const key = entry.trim().replace(/^["']|["']$/g, "");
+    if (key) moduleRoutes.add(key);
+  });
+}
+// native-modules.js meldet seine Routen aus VIEWS an, nicht als Literal.
+for (const key of nativeModules.matchAll(/^\s{4}(\w+):\s*render\w+,?$/gm)) moduleRoutes.add(key[1]);
+const appKeys = [...app.matchAll(/\{ key: "([\w]+)",/g)].map((match) => match[1]);
+const nativeRoutesBlock = app.slice(app.indexOf("const NATIVE_ROUTES"), app.indexOf("const state = {"));
+const collectionKeys = [...app.matchAll(/^\s{4}(\w+): \{ label:/gm)].map((match) => match[1]);
+const routerKeys = [...app.matchAll(/route === "(\w+)"/g)].map((match) => match[1]);
+const missing = appKeys.filter((key) =>
+  !moduleRoutes.has(key) &&
+  !collectionKeys.includes(key) &&
+  !routerKeys.includes(key) &&
+  !new RegExp(`"${key}"`).test(nativeRoutesBlock));
+assert.deepEqual(missing, [], `diese Apps haben keine eigene Tablet-Ansicht: ${missing.join(", ")}`);
+
+// Und der App-Bildschirm darf keine App mehr als „Separat" auszeichnen.
+assert.doesNotMatch(app, /Separat<\/small>|>Separat</, "keine App darf noch als \"Separat\" markiert sein");
+assert.match(app, /function isNativeRoute\b/, "app.js muss selbst pruefen, welche Route nativ ist");
+
+// Die nativen Ansichten muessen echte Bereiche des Datenstands lesen.
+for (const view of ["renderTime", "renderWorkload", "renderWeekplan", "renderKnowledge", "renderThesis",
+  "renderJournal", "renderReflecta", "renderMessages", "renderUpdates", "renderMeasures", "renderDrive",
+  "renderPdf", "renderDocStudio", "renderBrowser", "renderBriefings", "renderQuantusProject", "renderSmarter",
+  "renderGoogleCalendar"]) {
+  assert.match(nativeModules, new RegExp(`function ${view}\\b`), `native-modules.js fehlt ${view}`);
+}
+// Sie schreiben ausschliesslich ueber die gemeinsame Firebase-Transaktion.
+assert.match(nativeModules, /a\.executeOperation\(a\.makeOperation\(/, "native Ansichten muessen ueber executeOperation schreiben");
+assert.doesNotMatch(nativeModules, /db\.ref\(|polaris\/inbox/, "native Ansichten duerfen keinen zweiten Schreibweg oeffnen");
+
+// „Nachrichten" ist scheduledMessages, nicht der Gmail-Posteingang.
+assert.doesNotMatch(mailApp, /routes:\s*\[[^\]]*"messages"/, "die Mail-App darf die Route messages nicht mehr belegen");
+assert.match(nativeModules, /messages: renderMessages/, "Nachrichten an mich brauchen eine eigene native Ansicht");
 // Enhanced handwriting: marker/highlighter mode and colour presets.
 assert.match(workspace, /highlighter/, "missing highlighter/marker handwriting mode");
 assert.match(workspace, /INK_COLORS/, "missing handwriting colour presets");
@@ -51,9 +107,6 @@ assert.match(html, /firebase-storage-compat\.js/, "missing Firebase Storage SDK"
 assert.match(html, /data-action="workspace"/, "missing global workspace launcher");
 
 // Eigenstaendige Tablet-Programme: Homebildschirm, Mail und FlowerTech.
-const springboard = fs.readFileSync(path.join(root, "springboard.js"), "utf8");
-const mailApp = fs.readFileSync(path.join(root, "mail-app.js"), "utf8");
-const flowertechApp = fs.readFileSync(path.join(root, "flowertech-app.js"), "utf8");
 for (const source of [springboard, mailApp, flowertechApp]) {
   assert.match(source, /__quantusTabletModules/, "tablet modules must register themselves");
 }
@@ -113,12 +166,67 @@ assert.doesNotMatch(springboard, /LONG_PRESS_MS/,
   "der lange Druck ist zurueck — er verschluckt wieder den normalen Tipp");
 assert.doesNotMatch(springboard, /lastLongPress/,
   "onAction sperrt wieder Klicks nach einem langen Druck");
-assert.doesNotMatch(springboard, /pointerdown/,
-  "auf den App-Symbolen haengt wieder ein Zeiger-Handler, der den Tipp abfangen kann");
-assert.match(springboard, /if \(!dockModus\) return false;/,
-  "ausserhalb des Dock-Modus darf onAction gar nichts abfangen");
-assert.match(springboard, /data-action="sb-dock-modus"/,
-  "es fehlt der sichtbare Schalter fuer den Dock-Modus");
+/*
+ * DAS ANORDNEN BRAUCHT ZEIGER-EREIGNISSE — ABER NUR IM MODUS.
+ *
+ * Frueher stand hier "springboard.js darf das Wort pointerdown nicht
+ * enthalten". Das war die richtige Antwort auf den damaligen Fehler, aber es
+ * ist zu grob: der Homebildschirm laesst sich jetzt anordnen, und Ziehen
+ * geht nun einmal nicht ohne Zeiger-Ereignisse.
+ *
+ * Die Regel dahinter bleibt aber wortgleich bestehen: AUSSERHALB DES
+ * ANORDNEN-MODUS DARF KEIN ZEIGER-HANDLER AUF DEN SYMBOLEN LIEGEN. Deshalb
+ * wird jetzt geprueft, was wirklich zaehlt —
+ *   1. die Handler werden ausschliesslich in startDragging() angemeldet,
+ *   2. startDragging() laeuft nur, wenn der Modus eingeschaltet wird,
+ *   3. stopDragging() meldet jeden davon wieder ab,
+ *   4. und der Modus wird beim Verlassen des Homebildschirms fallengelassen.
+ * Faellt eines davon weg, ist der alte Fehler unter neuem Namen zurueck.
+ */
+assert.match(springboard, /function startDragging\(\) \{[\s\S]*?addEventListener\("pointerdown"/,
+  "die Zeiger-Handler haengen nicht mehr an startDragging");
+assert.match(springboard, /if \(on\) startDragging\(\); else stopDragging\(\);/,
+  "die Zeiger-Handler sind nicht mehr an den Anordnen-Modus gekoppelt");
+for (const event of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+  assert.match(springboard, new RegExp(`function stopDragging\\(\\)[\\s\\S]*?removeEventListener\\("${event}"`),
+    `stopDragging meldet ${event} nicht wieder ab — der Handler wirkt weiter`);
+}
+assert.match(springboard, /if \(route !== "home"\) \{[\s\S]*?stopDragging\(\);/,
+  "beim Verlassen des Homebildschirms bleibt der Anordnen-Modus stehen");
+// Ein einziger Zeiger-Handler ausserhalb von startDragging waere genau der
+// alte Fehler. addEventListener fuer Zeiger darf es nur dort geben.
+{
+  const pointerBindings = [...springboard.matchAll(/addEventListener\("pointer\w+"/g)].length;
+  const insideStart = (springboard.match(/function startDragging\(\)[\s\S]*?\n  \}/) || [""])[0];
+  assert.equal(pointerBindings, [...insideStart.matchAll(/addEventListener\("pointer\w+"/g)].length,
+    "es haengt ein Zeiger-Handler ausserhalb des Anordnen-Modus");
+}
+assert.match(springboard, /if \(!arrangeMode\) return false;/,
+  "ausserhalb des Anordnen-Modus darf onAction gar nichts abfangen");
+assert.match(springboard, /data-action="sb-arrange"/,
+  "es fehlt der sichtbare Schalter fuer das Anordnen");
+
+/*
+ * ANORDNEN: VERSCHIEBEN UND DOCK.
+ *
+ * Die Anordnung liegt in einem eigenen Speicher (v2) und haelt Seiten UND
+ * Dock. Ohne normaliseLayout() waere eine neu dazugekommene App auf dem
+ * Homebildschirm unsichtbar — man merkt das erst, wenn man sie sucht.
+ */
+assert.match(springboard, /LAYOUT_KEY/, "die Anordnung wird nicht gespeichert");
+for (const fn of ["defaultLayout", "loadLayout", "normaliseLayout", "saveLayout", "place", "pluck", "resetLayout"]) {
+  assert.match(springboard, new RegExp(`function ${fn}\\b`), `springboard.js fehlt ${fn}`);
+}
+assert.match(springboard, /data-action="sb-reset"/, "es fehlt der Knopf zum Zuruecksetzen");
+assert.match(springboard, /sb-drop-end/, "es fehlt die Ablageflaeche am Seitenende und im Dock");
+// Aufheben und ablegen muss ohne Ziehen funktionieren — mit Finger, Stift und
+// Maus gleichermassen. Sonst braucht das Anordnen eine ruhige Hand.
+assert.match(springboard, /aufgehoben = key;/, "ein Tipp hebt kein Symbol auf");
+assert.match(springboard, /function swallowNextClick\b/,
+  "nach einem Zug folgt ein Klick, der das Symbol sofort wieder aufheben wuerde");
+// Der App-Bildschirm startet das Anordnen von aussen.
+assert.match(springboard, /QuantusTabletSpringboard/, "der Homebildschirm meldet keine Schnittstelle an");
+assert.match(app, /startArrange/, "der App-Bildschirm kann das Anordnen nicht starten");
 // Und das Morgenbriefing steht auf dem Homebildschirm. app.js hat dafuer einen
 // Hero, aber springboard.js ueberschreibt renderHome() — er lief dort nie.
 assert.match(springboard, /function briefingBlock/,
