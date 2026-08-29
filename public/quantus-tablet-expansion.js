@@ -7,7 +7,11 @@
     bm: null,
     smarter: null,
     leseplan: null,
+    leseplanAufbereitung: null,
     career: null,
+    // Welches Dokument und welche Einheit im Leseplan offen sind.
+    leseplanDoc: null,
+    leseplanEinheit: null,
     userId: "",
     refs: [],
     mounted: false,
@@ -231,6 +235,7 @@
     listen(db, "bmpruefung", "bm");
     listen(db, "smarter/documents", "smarter");
     listen(db, "leseplan/docs", "leseplan");
+    listen(db, "leseplan/aufbereitung", "leseplanAufbereitung");
     listen(db, "careerModel/users/" + uid, "career");
   }
 
@@ -317,35 +322,137 @@
       '</div></div>';
   }
 
+  /*
+   * LESEPLAN.
+   *
+   * BEFUND (Nutzer: "im leseplan sehe ich zwar den inhalt aber kann ihn nicht
+   * oeffnen"): diese Ansicht zeigte Titel, Fortschritt und Zieldatum — also
+   * die Verpackung. Der zu lesende Text stand nie darin.
+   *
+   * Er liegt in `docs[id].sektionen[<sId>].html`, und `plan[i].sektionIds`
+   * sagt, welche Abschnitte zu welcher Einheit gehoeren (Datenvertrag: AI Sync
+   * public/index.html, Zeile 19307 ff.). Die Ansicht setzt sie jetzt in dieser
+   * Reihenfolge zusammen und zeigt sie.
+   *
+   * Dazu gehoert das Gegenstueck: gelesen abhaken. Das schreibt
+   * plan[i].done/doneAt sowie einheitenErledigt und status — dieselben Felder,
+   * die die Hauptapp fuehrt. Ein Haken, der nur lokal wirkt, waere ein zweiter
+   * Datenstand.
+   */
+  function leseplanDoc(id) {
+    var docs = asObject(state.leseplan);
+    var doc = asObject(docs[id]);
+    return Object.keys(doc).length ? Object.assign({ _id: id }, doc) : null;
+  }
+
+  // Der Text einer Einheit: ihre Abschnitte in der Reihenfolge, die der Plan
+  // vorgibt. Faellt sektionIds aus, wird nichts erfunden — dann ist die
+  // Einheit eben leer, und die Ansicht sagt es.
+  function leseplanEinheitHtml(doc, unit) {
+    var sektionen = asObject(doc.sektionen);
+    var ids = asArray(unit && unit.sektionIds);
+    if (!ids.length) return "";
+    return ids.map(function (sid) {
+      var abschnitt = asObject(sektionen[sid]);
+      var titel = abschnitt.title ? '<h3>' + esc(abschnitt.title) + '</h3>' : "";
+      return titel + String(abschnitt.html || "");
+    }).join("");
+  }
+
+  function leseplanAktuelleEinheit(doc) {
+    var plan = asArray(doc.plan);
+    var offen = plan.filter(function (u) { return u && !u.done; });
+    if (offen.length) return offen[0];
+    return plan.length ? plan[plan.length - 1] : null;
+  }
+
   function renderLeseplan() {
     var docs = values(state.leseplan);
     var next = nextReadingUnit();
-    var offen = docs.filter(function (d) { return d.status !== "fertig"; });
+    var offeneDocs = docs.filter(function (d) { return d.status !== "fertig"; });
+
+    // Welches Dokument und welche Einheit offen sind. Ohne Wahl: das Dokument
+    // der naechsten faelligen Einheit — das ist fast immer das gemeinte.
+    var docId = state.leseplanDoc || (next && next.doc ? next.doc.id : null) || (docs[0] && docs[0].id) || null;
+    var doc = docId ? leseplanDoc(docId) : null;
+    var plan = doc ? asArray(doc.plan) : [];
+    var idx = state.leseplanEinheit;
+    if (doc && (idx == null || !plan[idx])) {
+      var aktuell = leseplanAktuelleEinheit(doc);
+      idx = aktuell ? (aktuell.index != null ? aktuell.index : plan.indexOf(aktuell)) : null;
+    }
+    var unit = idx != null ? plan[idx] : null;
+    // Die hergeleitete Wahl zurueckschreiben. Ohne das kennen die Aktionen
+    // (abhaken, blaettern) das Dokument nicht, solange man noch keines
+    // angetippt hat — der erste Klick auf "Als gelesen markieren" ginge ins
+    // Leere, obwohl die Einheit sichtbar vor einem steht.
+    state.leseplanDoc = docId;
+    state.leseplanEinheit = idx;
+    var html = doc && unit ? leseplanEinheitHtml(doc, unit) : "";
+    var fertig = plan.filter(function (u) { return u && u.done; }).length;
+    var aufbereitung = asObject(asObject(asObject(state.leseplanAufbereitung)[docId])[idx]);
+    var heute = dateKey();
 
     return '<div class="view qt-route">' +
-      head("Leseplan", "Dokumente auf ihr Zieldatum verteilt — die nächste Einheit zuoberst.",
+      head("Leseplan", "Die Einheit von heute lesen, abhaken, weiter — alles im Tablet.",
         vollversion("index.html#/leseplan", "Vollversion öffnen")) +
-      '<div class="dashboard-grid">' +
-        '<section class="widget span-12 hero-widget"><div class="widget-head"><span class="widget-icon">▤</span><h2>Als Nächstes</h2></div>' +
-          (next
-            ? '<div class="qt-route-title">' + esc(titleOf(next.doc, "Leseeinheit")) + '</div>' +
-              '<p class="muted">Einheit ' + (Number(next.unit.index != null ? next.unit.index : next.index) + 1) +
-              ' · ca. ' + esc(String(next.unit.estMinutes || 10)) + ' Min. · ' + esc(String(next.unit.datum || "ohne Datum")) + '</p>'
-            : leerHinweis("Kein offener Abschnitt — alles gelesen.")) +
-        '</section>' +
-        '<section class="widget span-12"><div class="widget-head"><span class="widget-icon">◧</span><h2>Dokumente</h2></div>' +
-          (offen.length
-            ? '<div class="item-list">' + offen.map(function (d) {
-                var plan = asArray(d.plan);
-                var fertig = plan.filter(function (u) { return u && u.done; }).length;
-                return '<div class="list-item"><div class="item-main">' +
-                  '<div class="item-title">' + esc(titleOf(d, "Dokument")) + '</div>' +
-                  '<div class="item-meta">' + fertig + ' von ' + plan.length + ' Einheiten' +
-                  (d.zieldatum ? ' · bis ' + esc(String(d.zieldatum)) : "") + '</div>' +
-                  fortschritt(plan.length ? fertig / plan.length : 0) +
-                  '</div></div>';
+      '<div class="qt-lp-layout">' +
+        // ── Links: Dokumente und ihr Plan ─────────────────────────────────
+        '<aside class="qt-lp-side">' +
+          '<div class="qt-lp-side-head">Dokumente</div>' +
+          (docs.length
+            ? docs.map(function (d) {
+                var dPlan = asArray(d.plan);
+                var dFertig = dPlan.filter(function (u) { return u && u.done; }).length;
+                return '<button class="qt-lp-doc' + (d.id === docId ? " on" : "") +
+                  '" data-qt-action="lp-doc" data-id="' + esc(String(d.id)) + '">' +
+                  '<strong>' + esc(titleOf(d, "Dokument")) + '</strong>' +
+                  '<small>' + dFertig + ' von ' + dPlan.length + ' Einheiten' +
+                  (d.zieldatum ? ' · bis ' + esc(String(d.zieldatum)) : "") + '</small>' +
+                  fortschritt(dPlan.length ? dFertig / dPlan.length : 0) + '</button>';
+              }).join("")
+            : leerHinweis("Noch kein Dokument im Leseplan.")) +
+          (doc && plan.length
+            ? '<div class="qt-lp-side-head">Einheiten</div>' +
+              '<div class="qt-lp-plan">' + plan.map(function (u, i) {
+                var nummer = u && u.index != null ? u.index : i;
+                var faellig = String(u && u.datum || "") <= heute;
+                return '<button class="qt-lp-unit' + (i === idx ? " on" : "") + (u && u.done ? " done" : "") +
+                  '" data-qt-action="lp-unit" data-idx="' + i + '">' +
+                  '<span class="qt-lp-unit-nr">' + (Number(nummer) + 1) + '</span>' +
+                  '<span class="qt-lp-unit-main"><b>' + esc(String(u && u.datum || "ohne Datum")) + '</b>' +
+                  '<small>≈ ' + esc(String((u && u.estMinutes) || 0)) + ' Min</small></span>' +
+                  '<span class="qt-lp-unit-state">' + (u && u.done ? "✓" : (faellig ? "fällig" : "·")) + '</span></button>';
               }).join("") + '</div>'
-            : leerHinweis("Keine offenen Dokumente.")) +
+            : "") +
+        '</aside>' +
+        // ── Rechts: die Einheit selbst ────────────────────────────────────
+        '<section class="qt-lp-read">' +
+          (doc && unit
+            ? '<div class="qt-lp-read-head">' +
+                '<div><strong>' + esc(titleOf(doc, "Dokument")) + '</strong>' +
+                '<small>Einheit ' + (Number(unit.index != null ? unit.index : idx) + 1) + ' von ' + plan.length +
+                ' · ' + esc(String(unit.datum || "ohne Datum")) + ' · ≈ ' + esc(String(unit.estMinutes || 0)) + ' Min' +
+                ' · ' + fertig + ' gelesen</small></div>' +
+                '<div class="qt-lp-read-actions">' +
+                  '<button class="btn" data-qt-action="lp-step" data-step="-1"' + (idx > 0 ? "" : " disabled") + '>‹</button>' +
+                  '<button class="btn' + (unit.done ? "" : " primary") + '" data-qt-action="lp-done" data-idx="' + idx +
+                    '" data-done="' + (unit.done ? "0" : "1") + '">' +
+                    (unit.done ? "↺ Wieder offen" : "✓ Als gelesen markieren") + '</button>' +
+                  '<button class="btn" data-qt-action="lp-step" data-step="1"' + (idx < plan.length - 1 ? "" : " disabled") + '>›</button>' +
+                '</div>' +
+              '</div>' +
+              (aufbereitung.zusammenfassung || asArray(aufbereitung.kernpunkte).length
+                ? '<div class="qt-lp-ai"><h4>Aufbereitung</h4>' +
+                  (aufbereitung.zusammenfassung ? '<p>' + esc(String(aufbereitung.zusammenfassung)) + '</p>' : "") +
+                  (asArray(aufbereitung.kernpunkte).length
+                    ? '<ul>' + asArray(aufbereitung.kernpunkte).map(function (k) { return '<li>' + esc(String(k)) + '</li>'; }).join("") + '</ul>'
+                    : "") + '</div>'
+                : "") +
+              (html
+                ? '<div class="qt-lp-text" data-reader="true">' + html + '</div>'
+                : leerHinweis("Diese Einheit enthält keinen Text — das Dokument wurde noch nicht aufbereitet."))
+            : leerHinweis("Wähle links ein Dokument, um zu lesen.")) +
         '</section>' +
       '</div></div>';
   }
@@ -391,11 +498,111 @@
   }
 
   function renderRoute(route) {
+    // "bm" gehoert jetzt bm-app.js — einer eigenstaendigen App mit Lernplan,
+    // Kompendium und Wiederholungen. Der Rueckfall hier bleibt fuer den Fall,
+    // dass diese Datei einmal nicht geladen ist.
     if (route === "bm") return renderBm();
     if (route === "leseplan") return renderLeseplan();
     if (route === "career") return renderCareer();
     return "";
   }
+
+  /*
+   * BEDIENUNG DER LERN-ANSICHTEN.
+   *
+   * Dieses Modul meldet sich NICHT als Tablet-Modul an (app.js kennt es ueber
+   * QuantusTabletLearningHub), bekommt also kein onAction. Ein eigener
+   * Handler ist deshalb der einzige Weg — er haengt am Dokument und reagiert
+   * nur auf den eigenen Namensraum data-qt-action. `data-qu-action` gehoert
+   * dem universellen UI-Skript; darauf zu bauen hiesse, sich auf fremden
+   * Code zu verlassen, der hier gar nicht geladen sein muss.
+   */
+  function db() {
+    var sync = global.QuantusDeviceSync;
+    if (sync && sync.state && sync.state.db) return sync.state.db;
+    var q = api();
+    return q && typeof q.getDatabase === "function" ? q.getDatabase() : null;
+  }
+
+  function meldung(titel, text, art) {
+    var q = api();
+    if (q && q.toast) q.toast(titel, text || "", art || "");
+  }
+
+  function neuZeichnen() {
+    var q = api();
+    if (q && q.render) q.render();
+  }
+
+  // Eine Leseeinheit abhaken. Geschrieben wird dorthin, wo die Hauptapp liest:
+  // plan[i].done/doneAt, dazu einheitenErledigt und status. Ein Haken, der nur
+  // hier wirkt, waere ein zweiter Datenstand.
+  function leseplanEinheitSetzen(docId, index, gelesen) {
+    var verbindung = db();
+    if (!verbindung) { meldung("Nicht gespeichert", "Keine Verbindung zur Datenbank.", "error"); return; }
+    var doc = leseplanDoc(docId);
+    if (!doc) return;
+    var plan = asArray(doc.plan).slice();
+    if (!plan[index]) return;
+    plan[index] = Object.assign({}, plan[index], {
+      done: Boolean(gelesen),
+      doneAt: gelesen ? new Date().toISOString() : null
+    });
+    var fertig = plan.filter(function (u) { return u && u.done; }).length;
+    verbindung.ref("leseplan/docs/" + docId).update({
+      plan: plan,
+      einheitenErledigt: fertig,
+      status: fertig >= plan.length && plan.length ? "fertig" : "aktiv",
+      updatedAt: new Date().toISOString()
+    }).then(function () {
+      meldung(gelesen ? "Als gelesen markiert" : "Wieder offen", fertig + " von " + plan.length + " Einheiten", "ok");
+      // Nach dem Abhaken auf die naechste offene Einheit springen — sonst
+      // bleibt man auf dem gerade Gelesenen stehen und muss selbst suchen.
+      if (gelesen) {
+        var naechste = plan.findIndex(function (u, i) { return i > index && u && !u.done; });
+        if (naechste < 0) naechste = plan.findIndex(function (u) { return u && !u.done; });
+        if (naechste >= 0) state.leseplanEinheit = naechste;
+      }
+      neuZeichnen();
+    }).catch(function (fehler) {
+      meldung("Nicht gespeichert", fehler.message, "error");
+    });
+  }
+
+  global.document.addEventListener("click", function (event) {
+    var knopf = event.target.closest ? event.target.closest("[data-qt-action]") : null;
+    if (!knopf) return;
+    var aktion = knopf.dataset.qtAction;
+
+    if (aktion === "lp-doc") {
+      state.leseplanDoc = knopf.dataset.id;
+      state.leseplanEinheit = null;
+      neuZeichnen();
+      return;
+    }
+    if (aktion === "lp-unit") {
+      state.leseplanEinheit = Number(knopf.dataset.idx);
+      neuZeichnen();
+      return;
+    }
+    if (aktion === "lp-step") {
+      var doc = leseplanDoc(state.leseplanDoc);
+      if (!doc) return;
+      var plan = asArray(doc.plan);
+      var jetzt = state.leseplanEinheit;
+      if (jetzt == null) {
+        var aktuell = leseplanAktuelleEinheit(doc);
+        jetzt = aktuell ? plan.indexOf(aktuell) : 0;
+      }
+      var ziel = jetzt + Number(knopf.dataset.step || 0);
+      if (ziel >= 0 && ziel < plan.length) { state.leseplanEinheit = ziel; neuZeichnen(); }
+      return;
+    }
+    if (aktion === "lp-done") {
+      leseplanEinheitSetzen(state.leseplanDoc, Number(knopf.dataset.idx), knopf.dataset.done === "1");
+      return;
+    }
+  });
 
   global.QuantusTabletLearningHub = { state: state, render: renderHomeExpansion, connect: connectData, renderRoute: renderRoute };
   if (global.document.readyState === "loading") global.document.addEventListener("DOMContentLoaded", start, { once: true }); else start();

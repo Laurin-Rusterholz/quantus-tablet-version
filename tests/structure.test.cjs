@@ -16,7 +16,7 @@ const nativeModules = fs.readFileSync(path.join(root, "native-modules.js"), "utf
 for (const id of ["app", "main", "overlayRoot", "syncDot", "accountButton"]) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
 }
-for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "native-modules.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "native-modules.js", "app.js", "icon.svg", "manifest.webmanifest"]) {
+for (const file of ["styles.css", "tablet-workspace.css", "apps.css", "native-modules.css", "sync-core.js", "tablet-workspace.js", "springboard.js", "mail-app.js", "flowertech-app.js", "native-modules.js", "bm-app.js", "bm-app.css", "sticky-app.js", "sticky-app.css", "app.js", "icon.svg", "manifest.webmanifest"]) {
   assert.equal(fs.existsSync(path.join(root, file)), true, `missing ${file}`);
   assert.match(serviceWorker + html, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${file} is not referenced`);
 }
@@ -86,9 +86,33 @@ for (const view of ["renderTime", "renderWorkload", "renderWeekplan", "renderKno
   "renderGoogleCalendar"]) {
   assert.match(nativeModules, new RegExp(`function ${view}\\b`), `native-modules.js fehlt ${view}`);
 }
-// Sie schreiben ausschliesslich ueber die gemeinsame Firebase-Transaktion.
+/*
+ * DER SCHREIBWEG.
+ *
+ * Hier stand zuerst "native-modules.js darf das Wort db.ref nicht enthalten".
+ * Das war zu grob und haette eine richtige Aenderung blockiert: Smarter liegt
+ * gar nicht im Quantus-Datenstand, sondern in einem eigenen RTDB-Knoten
+ * (smarter/documents), in den AI Sync selbst direkt schreibt. Fuer diesen
+ * Bestand IST der direkte Weg der einzige — ihn zu verbieten hiesse, die
+ * eigenen Antworten nicht speichern zu koennen.
+ *
+ * Die Regel, um die es wirklich geht, lautet: der QUANTUS-DATENSTAND wird
+ * ausschliesslich ueber die gemeinsame Transaktion veraendert, und
+ * polaris/inbox bleibt unberuehrt. Genau das wird jetzt geprueft.
+ */
 assert.match(nativeModules, /a\.executeOperation\(a\.makeOperation\(/, "native Ansichten muessen ueber executeOperation schreiben");
-assert.doesNotMatch(nativeModules, /db\.ref\(|polaris\/inbox/, "native Ansichten duerfen keinen zweiten Schreibweg oeffnen");
+assert.doesNotMatch(nativeModules, /polaris\/inbox/, "das Tablet schreibt nicht in den n8n-Eingang");
+// Kein direkter Griff an den App-Blob — der laeuft nur ueber die Transaktion.
+assert.doesNotMatch(nativeModules, /app-data|appStore/, "der Quantus-Datenstand darf nur ueber die Transaktion geschrieben werden");
+// Und wo direkt geschrieben wird, dann nur in die dafuer vorgesehenen Knoten.
+for (const treffer of nativeModules.matchAll(/\.ref\((["'`])([^"'`]*)\1/g)) {
+  assert.ok(/^(smarter\/documents)/.test(treffer[2]),
+    `native-modules.js schreibt direkt nach "${treffer[2]}" — erlaubt ist nur der Smarter-Knoten`);
+}
+// Dasselbe fuer den Lern-Hub: Leseplan und BM haben eigene RTDB-Knoten.
+const expansion = fs.readFileSync(path.join(root, "quantus-tablet-expansion.js"), "utf8");
+assert.doesNotMatch(expansion, /polaris\/inbox/, "der Lern-Hub schreibt nicht in den n8n-Eingang");
+assert.doesNotMatch(expansion, /app-data|appStore/, "der Lern-Hub fasst den Quantus-Datenstand nicht direkt an");
 
 // „Nachrichten" ist scheduledMessages, nicht der Gmail-Posteingang.
 assert.doesNotMatch(mailApp, /routes:\s*\[[^\]]*"messages"/, "die Mail-App darf die Route messages nicht mehr belegen");
