@@ -89,6 +89,11 @@
     { key: "mail", label: "Mail", icon: "✉", tone: "blue", local: true, group: "Tablet" },
     { key: "flowertech", label: "FlowerTech", icon: "❀", tone: "coral", local: true, group: "Tablet" },
     { key: "workspace", label: "Tablet Canvas", icon: "✎", tone: "coral", local: true, group: "Tablet" },
+    // Sticky Boards sind eine eigene App: erst alle Boards, dann eines im
+    // Vollbild. Vorher kam man an ein Board nur ueber das Element, an dem es
+    // haengt — wer wissen wollte, welche es ueberhaupt gibt, musste jede
+    // Aufgabe einzeln aufmachen.
+    { key: "sticky", label: "Sticky Boards", icon: "▦", tone: "sand", local: true, group: "Tablet" },
     ...FULL_APP_DEFS,
     { key: "split", label: "Split-Screen", icon: "◫", tone: "blue", local: true, group: "Tablet" },
     { key: "settings", label: "Einstellungen", icon: "⚙", tone: "blue", local: true, group: "Tablet" }
@@ -116,7 +121,7 @@
     // Ohne Eintrag hier faellt go() still auf "home" zurueck — genau das sah
     // auf dem Tablet aus wie "die App laesst sich nicht oeffnen".
     bm: "BM Vorbereitung", leseplan: "Leseplan", career: "Career Model",
-    dashboard: "Dashboard", mail: "Mail", flowertech: "FlowerTech",
+    dashboard: "Dashboard", mail: "Mail", flowertech: "FlowerTech", sticky: "Sticky Boards",
     ...Object.fromEntries(FULL_APP_DEFS.map((app) => [app.key, app.label]))
   };
 
@@ -151,7 +156,7 @@
     // Statistiken und Berichte rendert renderRoute() selbst. Sie fehlten hier,
     // und weil der App-Bildschirm seine Einordnung aus dieser Liste zieht,
     // meldete er sie faelschlich als "ohne eigene Tablet-Ansicht".
-    "statistics", "reports",
+    "statistics", "reports", "sticky",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -1738,16 +1743,25 @@
   // laesst sich jederzeit frei zwischen allen Apps wechseln.
   function renderRoute(route) {
     if (route === "workspace") return window.QuantusTabletWorkspace?.renderRoute?.() || renderHome();
-    // BM, Leseplan und Career Model werden vom Lern-Hub gerendert — er
-    // abonniert ihre Daten ohnehin schon live. Dasselbe Muster wie beim Canvas.
-    if (route === "bm" || route === "leseplan" || route === "career") {
-      return window.QuantusTabletLearningHub?.renderRoute?.(route) || renderHome();
-    }
-    // Eigenstaendige Tablet-Programme zuerst (Homebildschirm, Mail, FlowerTech).
+    /*
+     * Eigenstaendige Tablet-Programme ZUERST (Homebildschirm, Mail,
+     * FlowerTech, native Module, BM).
+     *
+     * Vorher stand die Abfrage des Lern-Hubs davor und fing "bm", "leseplan"
+     * und "career" ab, bevor ein Modul ueberhaupt gefragt wurde. Ein Modul,
+     * das eine dieser Routen beansprucht, wurde damit stumm uebergangen —
+     * die Route sah aus, als waere sie nicht angemeldet. Jetzt gewinnt das
+     * spezialisierte Modul, und der Lern-Hub ist der Rueckfall.
+     */
     const mod = moduleFor(route);
     if (mod && typeof mod.render === "function") {
       try { return mod.render(route); }
       catch (error) { console.warn("[Tablet-Modul]", mod.key, error); }
+    }
+    // Leseplan und Career Model rendert der Lern-Hub — er abonniert ihre
+    // Daten ohnehin live.
+    if (route === "leseplan" || route === "career" || route === "bm") {
+      return window.QuantusTabletLearningHub?.renderRoute?.(route) || renderHome();
     }
     if (route === "home") return renderHome();
     if (route === "apps") return renderApps();
@@ -2288,7 +2302,18 @@
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="p"){event.preventDefault();openPolarisSheet();}
     // Ctrl/Cmd+S: Snapshot sichern und Warteschlange abgleichen statt Browser-Dialog.
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s"){event.preventDefault();saveSnapshot();flushPending();toast("Gesichert","Snapshot gespeichert, Warteschlange wird abgeglichen.","ok");}
-    const typing = /^(input|textarea|select)$/i.test(event.target && event.target.tagName || "");
+    /*
+     * BEFUND-KLASSE (CLAUDE.md, Fallstrick 3): hier wurde nur auf
+     * INPUT/TEXTAREA/SELECT geprueft. Eine Schreibflaeche mit
+     * contenteditable ist aber ein DIV — im Journal-Editor haetten Alt+N
+     * und Alt+1..9 mitten im Schreiben die Ansicht gewechselt.
+     * activeElement statt event.target, weil ein Tastendruck in einer
+     * verschachtelten Flaeche auf einem Kindknoten landen kann.
+     */
+    const fokus = document.activeElement;
+    const typing = /^(input|textarea|select)$/i.test(event.target && event.target.tagName || "") ||
+      /^(input|textarea|select)$/i.test(fokus && fokus.tagName || "") ||
+      Boolean(fokus && fokus.isContentEditable);
     // Alt+N: neuer Eintrag passend zur aktuellen Ansicht.
     if(event.altKey && !typing && event.key.toLowerCase()==="n"){event.preventDefault();openEntityForm(COLLECTION_CONFIG[state.route]?state.route:"tasks");}
     // Alt+1..9: direkt zwischen den Hauptansichten wechseln.

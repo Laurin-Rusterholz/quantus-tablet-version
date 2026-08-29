@@ -594,7 +594,8 @@
           '<div class="library-list">' + (documents.length ? documents.slice().reverse().map(function (doc) {
             return '<div class="doc-row' + (open && open.id === doc.id ? " on" : "") + '" data-action="nm-open" data-route="' +
               route + '" data-id="' + attr(doc.id) + '"><strong class="truncate" style="display:block">' +
-              esc(doc.title || "Eintrag") + '</strong><small class="muted">' + esc(fmtDate(doc.updatedAt || doc.createdAt)) + "</small></div>";
+              esc(doc.title || "Eintrag") + '</strong><small class="muted">' +
+              esc(nurText(doc.content).slice(0, 60) || fmtDate(doc.updatedAt || doc.createdAt)) + "</small></div>";
           }).join("") : nothingSmall("Noch kein Eintrag")) + "</div></aside>" +
         '<section class="reader-panel">' + (open
           ? '<form class="nm-editor" data-form="nm-journal-doc" data-id="' + attr(open.id) + '">' +
@@ -604,7 +605,12 @@
             '<button class="btn primary small-btn" type="submit">Sichern</button></div>' +
             '<div class="nm-editor-body">' +
             '<div class="field"><label>Titel</label><input name="title" value="' + attr(open.title || "") + '" required></div>' +
-            '<div class="field"><label>Text</label><textarea name="content" rows="18">' + esc(open.content || "") + "</textarea></div>" +
+            // Der Inhalt ist HTML und wird als HTML bearbeitet — genau wie im
+            // Journal Booklet. Ein textarea wuerde die Auszeichnung zeigen
+            // statt den Text, und beim Sichern alles doppelt escapen.
+            '<div class="field"><label>Text</label>' +
+            '<div class="nm-richtext" contenteditable="true" data-nm-richtext="content" ' +
+              'data-placeholder="Schreib los …" spellcheck="true">' + alsHtml(open.content) + "</div></div>" +
             "</div></form>"
           : '<div class="reader-empty"><div><span style="font-size:48px">J</span><h2>Journal</h2>' +
             '<p>Waehle links einen Eintrag oder lege einen neuen an.</p>' +
@@ -1141,6 +1147,81 @@
   // =========================================================================
   //  SMARTER
   // =========================================================================
+  /*
+   * SMARTER.
+   *
+   * BEFUND (Nutzer: "in smarter kann ich nichts lesen, nur Fragen"): diese
+   * Ansicht las `doc.summary` und `doc.text`. BEIDE FELDER GIBT ES NICHT.
+   * Der Lernstoff steht in `doc.documentHtml` (ein fertiges Dokument) oder,
+   * bei aelteren Eintraegen, in `doc.theoryHtml` — genau wie in AI Sync
+   * (public/index.html, smarterNativeToday). Uebrig blieben also die Fragen,
+   * und der zu lernende Text war unerreichbar.
+   *
+   * ZWEITER BEFUND an derselben Stelle: die Fragefelder heissen in den
+   * Dokumenten `q` und `a`. Gelesen wurden nur question/frage/front und
+   * answer/antwort/back — bei den kurzen Feldnamen stand als Frage das Wort
+   * "Frage" und als Antwort nichts.
+   *
+   * DRITTER: es gab kein Antwortfeld. Smarter ist zum Selbst-Beantworten
+   * gedacht; die Antworten liegen am Dokument unter `answers[qid]` und
+   * werden nach smarter/documents/<tag>/answers/<qid> geschrieben.
+   */
+  /*
+   * JOURNAL-INHALTE SIND HTML.
+   *
+   * BEFUND (Nutzer: "im journal wird nichts richtig angezeigt, absaetze
+   * werden nicht als absaetze sondern <div> angezeigt"): der Text der
+   * Journal-Dokumente kommt aus dem contenteditable des Journal Booklet
+   * (ai-sync public/index.html, #jbEditorArea) und ist damit HTML — jede
+   * Zeile ein <div>. Diese Ansicht hat ihn mit esc() entschaerft und in ein
+   * <textarea> gelegt: sichtbar wurde die Auszeichnung selbst statt des
+   * Textes, und beim Sichern waere daraus doppelt escapter Text geworden.
+   *
+   * Gelesen und geschrieben wird jetzt HTML — dasselbe Format, das der
+   * Desktop fuehrt. Fuer Vorschauen in Listen braucht es reinen Text.
+   */
+  function nurText(html) {
+    return String(html == null ? "" : html)
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<\/(p|div|li|h[1-6])>/gi, " ")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  // Sieht der Inhalt nach HTML aus? Alter Bestand kann reiner Text sein — der
+  // wird beim Anzeigen in Absaetze umgebrochen statt als eine Wand gezeigt.
+  function alsHtml(inhalt) {
+    var text = String(inhalt == null ? "" : inhalt);
+    if (/<(p|div|br|h[1-6]|ul|ol|li|b|i|strong|em)\b/i.test(text)) return text;
+    return text.split(/\n{2,}/).map(function (absatz) {
+      return "<p>" + esc(absatz).replace(/\n/g, "<br>") + "</p>";
+    }).join("");
+  }
+
+  function smarterFrage(item, index) {
+    if (typeof item === "string") return { id: "q" + (index + 1), frage: item, antwort: "" };
+    var entry = obj(item);
+    return {
+      id: entry.id || ("q" + (index + 1)),
+      frage: entry.q || entry.question || entry.frage || entry.front || "",
+      antwort: entry.a || entry.answer || entry.antwort || entry.back || ""
+    };
+  }
+
+  function smarterTitel(doc, tag) {
+    var entry = obj(doc);
+    if (entry.title && String(entry.title).trim()) return String(entry.title).trim();
+    if (entry.unitTitle && String(entry.unitTitle).trim()) return String(entry.unitTitle).trim();
+    var treffer = /<h2[^>]*>([\s\S]*?)<\/h2>/i.exec(String(entry.theoryHtml || ""));
+    if (treffer) {
+      var text = treffer[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (text) return text;
+    }
+    return "Lerndokument " + (tag || "");
+  }
+
   function renderSmarter() {
     var a = api();
     var route = "smarter";
@@ -1148,10 +1229,33 @@
     var keys = Object.keys(docs).sort().reverse();
     var openKey = ui.open[route] || keys[0] || null;
     var open = openKey ? obj(docs[openKey]) : null;
-    var questions = arr(open && open.questions);
+    var questions = arr(open && open.questions).map(smarterFrage);
+    var answers = obj(open && open.answers);
+    var beantwortet = questions.filter(function (frage) {
+      return frage.id && String(obj(answers[frage.id]).text || "").trim();
+    }).length;
+    var erledigt = Boolean(open && open.done);
+
+    // Das fertige Dokument ist eigenstaendiges HTML mit eigenen Stilen. Es
+    // gehoert deshalb in ein abgeschottetes iframe — im Fliesstext der App
+    // wuerden seine Regeln auf die ganze Ansicht durchschlagen. `sandbox`
+    // ohne allow-scripts: der Inhalt wird angezeigt, mehr darf er nicht.
+    var lesestoff = "";
+    if (open && open.documentHtml) {
+      lesestoff = '<div class="nm-doc-frame"><iframe class="nm-doc-iframe" title="Smarter Lerndokument" ' +
+        'sandbox="allow-same-origin" srcdoc="' + attr(String(open.documentHtml)) + '"></iframe></div>';
+    } else if (open && open.theoryHtml) {
+      // Alter Bestand ohne fertiges Dokument: die Theorie steht als HTML da
+      // und stammt aus demselben Workflow — sie wird eingebettet gerendert.
+      lesestoff = '<div class="nm-theorie">' + String(open.theoryHtml) + "</div>";
+    } else if (open) {
+      lesestoff = '<p class="muted">Fuer diesen Tag liegt kein Lerndokument vor — nur die Fragen unten.</p>';
+    }
 
     return '<div class="view">' +
-      head("Smarter", "Deine Tageslektionen: Frage lesen, selbst antworten, dann aufdecken.",
+      head("Smarter", "Lernstoff lesen, die Fragen selbst beantworten, dann die Musterantwort aufdecken.",
+        (open ? '<button class="btn" data-action="nm-smarter-done" data-id="' + attr(openKey) + '">' +
+          (erledigt ? "↺ Wieder offen" : "✓ Erledigt") + "</button>" : "") +
         '<button class="btn" data-action="go" data-route="learning">▣ Recall Lab</button>') +
       banner() +
       '<div class="reading-layout">' +
@@ -1159,26 +1263,39 @@
           "</span></div>" +
           '<div class="library-list">' + (keys.length ? keys.map(function (key) {
             var doc = obj(docs[key]);
+            var fragen = arr(doc.questions).length;
             return '<div class="doc-row' + (openKey === key ? " on" : "") + '" data-action="nm-open" data-route="' + route +
               '" data-id="' + attr(key) + '"><strong class="truncate" style="display:block">' +
-              esc(doc.title || doc.titel || fmtDate(key)) + '</strong><small class="muted">' +
-              arr(doc.questions).length + " Fragen</small></div>";
+              esc(smarterTitel(doc, key)) + '</strong><small class="muted">' + esc(fmtDate(key)) +
+              (fragen ? " · " + fragen + " Fragen" : "") + (doc.done ? " · ✓" : "") + "</small></div>";
           }).join("") : nothingSmall("Noch keine Lektion geladen")) + "</div></aside>" +
         '<section class="reader-panel">' + (open
-          ? '<div class="panel-head"><strong class="truncate">' + esc(open.title || open.titel || fmtDate(openKey)) + "</strong>" +
-            '<button class="btn small-btn" data-action="nm-smarter-reveal-all">Alles aufdecken</button></div>' +
+          ? '<div class="panel-head"><button class="icon-action" data-action="reader-wide" title="Liste ein-/ausblenden">◫</button>' +
+            '<button class="icon-action" data-action="reader-full" title="Vollbild">⛶</button>' +
+            '<strong class="truncate">' + esc(smarterTitel(open, openKey)) + "</strong>" +
+            '<span class="badge">' + beantwortet + "/" + questions.length + " beantwortet</span>" +
+            (questions.length ? '<button class="btn small-btn" data-action="nm-smarter-reveal-all">Alles aufdecken</button>' : "") +
+            "</div>" +
             '<div class="reader-content" data-reader="true"><article>' +
-            (open.summary || open.text ? "<p>" + esc(open.summary || open.text) + "</p>" : "") +
-            (questions.length ? questions.map(function (question, index) {
-              var answer = question.answer || question.antwort || question.back || "";
-              return '<div class="nm-qa nm-quiz"><strong>' + (index + 1) + ". " + esc(question.question || question.frage || question.front || "Frage") +
-                "</strong>" +
-                '<button class="btn small-btn nm-reveal" data-action="nm-smarter-reveal" data-index="' + index + '">Antwort zeigen</button>' +
-                '<p class="nm-answer" hidden>' + esc(answer) + "</p>" +
-                '<button class="btn small-btn" data-action="nm-to-card" data-front="' +
-                  attr(question.question || question.frage || question.front || "") + '" data-back="' + attr(answer) +
-                  '">▣ Als Karteikarte</button></div>';
-            }).join("") : "<p>Diese Lektion enthaelt noch keine Fragen.</p>") +
+            lesestoff +
+            (questions.length
+              ? '<h2 class="nm-fragen-titel">Fragen</h2>' + questions.map(function (frage, index) {
+                  var gespeichert = String(obj(answers[frage.id]).text || "");
+                  return '<div class="nm-qa nm-quiz" data-qid="' + attr(frage.id) + '">' +
+                    "<strong>" + (index + 1) + ". " + esc(frage.frage || "Frage") + "</strong>" +
+                    '<label class="nm-eigene"><span>Deine Antwort</span>' +
+                    '<textarea class="nm-antwort" data-action="nm-smarter-answer" data-day="' + attr(openKey) +
+                      '" data-qid="' + attr(frage.id) + '" rows="3" placeholder="Antworte aus dem Kopf, bevor du aufdeckst.">' +
+                      esc(gespeichert) + "</textarea>" +
+                    '<small class="nm-speicherstand" data-fb="' + attr(frage.id) + '"></small></label>' +
+                    (frage.antwort
+                      ? '<button class="btn small-btn nm-reveal" data-action="nm-smarter-reveal">Musterantwort zeigen</button>' +
+                        '<p class="nm-answer" hidden>' + esc(frage.antwort) + "</p>"
+                      : '<small class="muted">Zu dieser Frage gibt es keine Musterantwort.</small>') +
+                    '<button class="btn small-btn" data-action="nm-to-card" data-front="' + attr(frage.frage) +
+                      '" data-back="' + attr(frage.antwort) + '">▣ Als Karteikarte</button></div>';
+                }).join("")
+              : "") +
             "</article></div>"
           : '<div class="reader-empty"><div><span style="font-size:48px">Σ</span><h2>Smarter</h2>' +
             "<p>Waehle links eine Tageslektion.</p></div></div>") +
@@ -1381,6 +1498,22 @@
     }
 
     // Smarter
+    /*
+     * Der Smarter-Bestand liegt NICHT im Quantus-Datenstand, sondern in einem
+     * eigenen RTDB-Knoten (smarter/documents/<tag>) — genau dort schreibt auch
+     * AI Sync. Der Datenstand der App bleibt davon unberuehrt und laeuft
+     * weiterhin ausschliesslich ueber die gemeinsame Transaktion.
+     */
+    if (action === "nm-smarter-done") {
+      var tag = button.dataset.id;
+      var docs = obj(a.state.smarterDocs);
+      var jetztErledigt = !obj(docs[tag]).done;
+      smarterSchreiben(tag + "/done", jetztErledigt, function (fehler) {
+        if (fehler) a.toast("Nicht gespeichert", fehler.message, "error");
+        else a.toast(jetztErledigt ? "Als erledigt markiert" : "Wieder offen", esc(tag), "ok");
+      });
+      return true;
+    }
     if (action === "nm-smarter-reveal") {
       var block = button.closest(".nm-quiz");
       if (block) {
@@ -1454,9 +1587,13 @@
       return true;
     }
     if (type === "nm-journal-doc" || type === "nm-doc") {
+      // Die Schreibflaeche ist ein contenteditable und steht deshalb NICHT in
+      // den Formulardaten — FormData kennt nur echte Felder. Ohne diesen Griff
+      // waere jeder Eintrag beim Sichern leer.
+      var flaeche = form.querySelector('[data-nm-richtext="content"]');
+      var inhalt = flaeche ? flaeche.innerHTML : String(data.get("content") || "");
       writeList("update", "journal.documents", form.dataset.id, {
-        title: value("title"), content: String(data.get("content") || ""),
-        type: value("type") || "journal"
+        title: value("title"), content: inhalt, type: value("type") || "journal"
       });
       return true;
     }
@@ -1532,6 +1669,43 @@
     }
     return false;
   }
+
+  // Schreibt in den Smarter-Knoten. Ohne Datenbank (nicht angemeldet, offline)
+  // sagt es das, statt stumm nichts zu tun.
+  function smarterSchreiben(pfad, wert, fertig) {
+    var a = api();
+    var db = a && typeof a.getDatabase === "function" ? a.getDatabase() : null;
+    if (!db) { if (fertig) fertig(new Error("Keine Verbindung zur Datenbank")); return; }
+    try {
+      db.ref("smarter/documents/" + pfad).set(wert)
+        .then(function () { if (fertig) fertig(null); })
+        .catch(function (fehler) { if (fertig) fertig(fehler); });
+    } catch (fehler) { if (fertig) fertig(fehler); }
+  }
+
+  /*
+   * Die eigene Antwort wird beim Tippen gesichert — gebuendelt, nicht bei
+   * jedem Zeichen. Der Stand steht unter dem Feld, damit man sieht, dass es
+   * angekommen ist; ein stummes Feld laesst einen im Ungewissen, ob die
+   * Antwort den Ansichtswechsel ueberlebt.
+   */
+  var antwortTimer = {};
+  document.addEventListener("input", function (event) {
+    var feld = event.target.closest('[data-action="nm-smarter-answer"]');
+    if (!feld) return;
+    var qid = feld.dataset.qid;
+    var tag = feld.dataset.day;
+    var stand = document.querySelector('[data-fb="' + qid + '"]');
+    if (stand) stand.textContent = "…";
+    clearTimeout(antwortTimer[qid]);
+    antwortTimer[qid] = setTimeout(function () {
+      smarterSchreiben(tag + "/answers/" + qid, { text: feld.value, updatedAt: new Date().toISOString() }, function (fehler) {
+        if (!stand) return;
+        stand.textContent = fehler ? "nicht gespeichert" : "gespeichert ✓";
+        stand.className = "nm-speicherstand" + (fehler ? " fehler" : " ok");
+      });
+    }, 700);
+  });
 
   // „beispiel.ch" ist eine Adresse, aber kein gueltiges Ziel: ohne Schema
   // haette openExternalUrl sie stumm verworfen.

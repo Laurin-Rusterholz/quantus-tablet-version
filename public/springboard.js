@@ -103,6 +103,7 @@
       page.apps.forEach(function (app) { map[app.key] = app; });
     });
     map.mail = { key: "mail", label: "Mail", icon: "✉", tone: "blue" };
+    map.sticky = { key: "sticky", label: "Sticky Boards", icon: "▦", tone: "sand" };
     map.polaris = { key: "polaris", label: "Polaris", icon: "✦", tone: "green" };
     map.home = { key: "home", label: "Home", icon: "⌂", tone: "violet" };
     return map;

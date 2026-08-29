@@ -62,13 +62,34 @@ for (const route of ["bm", "leseplan", "career"]) {
 ok(/route === "smarter"/.test(app), "die bestehende smarter-Route wurde entfernt");
 ok(/route === "workspace"/.test(app), "die Pinnboard-/Canvas-Route wurde entfernt");
 
-// ── 3. Die Routentabelle delegiert an den Lern-Hub ──────────────────────
+// ── 3. Jede der drei Lern-Routen wird gerendert ─────────────────────────
+/*
+ * Hier stand die Zeile aus app.js woertlich:
+ *   route === "bm" || route === "leseplan" || route === "career"
+ * Das pruefte die Schreibweise, nicht die Sache. Inzwischen hat "bm" eine
+ * eigene App (bm-app.js), die sich als Tablet-Modul anmeldet — und dafuer
+ * musste die Modulabfrage VOR den Lern-Hub. Die Absicht ist unveraendert:
+ * keine der drei Routen darf still auf home zurueckfallen.
+ */
 {
   const k = ohneKommentare(app);
-  ok(/route === "bm" \|\| route === "leseplan" \|\| route === "career"/.test(k),
-    "die drei Lern-Routen werden nicht gerendert");
+  const module = [
+    ohneKommentare(read("native-modules.js")),
+    ohneKommentare(read("bm-app.js")),
+    ohneKommentare(read("springboard.js"))
+  ].join("\n");
+  for (const route of ["bm", "leseplan", "career"]) {
+    const imHub = new RegExp(`route === "${route}"`).test(k);
+    const imModul = new RegExp(`routes: \\[[^\\]]*"${route}"`).test(module) ||
+      new RegExp(`^\\s{4}${route}: render`, "m").test(module);
+    ok(imHub || imModul, `die Route ${route} wird von niemandem gerendert`);
+  }
   ok(/QuantusTabletLearningHub\?\.renderRoute\?\.\(route\)/.test(k),
     "die Routen delegieren nicht an den Lern-Hub");
+  // Und die Modulabfrage muss VOR dem Lern-Hub stehen, sonst kann eine
+  // eigene App eine dieser Routen gar nicht uebernehmen.
+  ok(k.indexOf("const mod = moduleFor(route)") < k.indexOf("QuantusTabletLearningHub?.renderRoute"),
+    "der Lern-Hub faengt die Route ab, bevor ein Modul gefragt wird");
 }
 
 // ── 4. Die Karten zeigen nach INNEN ─────────────────────────────────────

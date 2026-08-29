@@ -1,0 +1,100 @@
+/*
+ * Sticky Boards. Uebersicht als Karten mit echter Vorschau, Board im Vollbild.
+ */
+
+/* ── Übersicht ──────────────────────────────────────────────────────────── */
+.sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.sk-karte {
+  display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-raised); color: var(--text); cursor: pointer;
+  box-shadow: var(--shadow-soft); transition: .18s ease;
+}
+.sk-karte:hover { transform: translateY(-3px); border-color: var(--border2); }
+.sk-karte-vorschau {
+  display: block; height: 150px; background: var(--surface-overlay);
+  border-bottom: 1px solid var(--border); padding: 10px;
+}
+.sk-vorschau { width: 100%; height: 100%; }
+.sk-karte-fuss { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px 14px; }
+.sk-karte-fuss strong { font-size: 14.5px; line-height: 1.35; }
+.sk-karte-fuss small { color: var(--muted); font-size: 11.5px; }
+.sk-karte-fuss .badge { align-self: flex-start; }
+.sk-neu { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.sk-neu select {
+  flex: 1; min-width: 220px; padding: 11px 13px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface-overlay); color: var(--text); font: 14px var(--font);
+}
+
+/* ── Board im Vollbild ──────────────────────────────────────────────────── */
+/* Die Flaeche nimmt die ganze Hoehe zwischen Kopfzeile und Dock — ein Board
+   in einem kleinen Kasten war genau das, was vorher stoerte. */
+.sk-board { display: flex; flex-direction: column; height: var(--content-h); min-height: 420px; }
+.sk-leiste {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 4px 12px; border-bottom: 1px solid var(--border);
+}
+.sk-leiste-titel { min-width: 0; }
+.sk-leiste-titel strong { display: block; font-size: 15px; }
+.sk-leiste-titel small { display: block; color: var(--muted); font-size: 11.5px; }
+.sk-leiste-rechts { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.sk-zoomwert { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 42px; text-align: center; }
+
+.sk-palette { display: flex; gap: 5px; }
+.sk-farbe {
+  width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent;
+  cursor: pointer; padding: 0;
+}
+.sk-farbe.on { border-color: var(--text); transform: scale(1.12); }
+
+.sk-flaeche {
+  position: relative; flex: 1; min-height: 0; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius); margin-top: 12px;
+  background: var(--surface-base);
+  background-image: radial-gradient(circle, color-mix(in oklab, var(--border2) 55%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  /* Ohne das scrollt das Tablet die Seite, statt das Board zu schieben. */
+  touch-action: none;
+  cursor: grab;
+}
+.sk-welt { position: absolute; inset: 0; transform-origin: 0 0; }
+.sk-linien { position: absolute; overflow: visible; pointer-events: none; width: 1px; height: 1px; }
+.sk-linien line { stroke: var(--border2); stroke-width: 2; }
+
+.sk-note {
+  position: absolute; border-radius: 12px; box-shadow: 0 6px 18px rgba(0, 0, 0, .28);
+  display: flex; flex-direction: column; overflow: hidden; cursor: grab;
+}
+.sk-note.on { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* Die Griffleiste ist die Stelle zum Anfassen — ohne sie bedeckt das
+   Textfeld die ganze Notiz und ein Zug markiert nur Text. Sie ist bewusst
+   hoch genug fuer einen Finger. */
+.sk-note-griff {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 30px; padding: 0 8px; flex: none;
+  background: rgba(0, 0, 0, .09); cursor: grab; touch-action: none;
+}
+.sk-note-griff:active { cursor: grabbing; }
+.sk-note-punkte { font-size: 15px; opacity: .55; letter-spacing: 1px; }
+.sk-note-text {
+  flex: 1; padding: 12px 14px 14px; font: 15px/1.45 var(--font); overflow-y: auto;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  cursor: text; word-break: break-word;
+}
+.sk-note-text:focus { outline: none; background: rgba(255, 255, 255, .35); }
+.sk-note-werkzeuge { display: flex; gap: 4px; opacity: 0; transition: opacity .14s ease; }
+.sk-note:hover .sk-note-werkzeuge, .sk-note.on .sk-note-werkzeuge { opacity: 1; }
+.sk-note-knopf {
+  width: 26px; height: 26px; border-radius: 7px; border: 0; cursor: pointer;
+  background: rgba(0, 0, 0, .16); color: inherit; font-size: 12px;
+}
+.sk-leerflaeche {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--muted); font-size: 14px; pointer-events: none;
+}
+
+@media (max-width: 900px) {
+  .sk-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .sk-karte-vorschau { height: 118px; }
+  .sk-leiste-rechts { margin-left: 0; width: 100%; justify-content: space-between; }
+}

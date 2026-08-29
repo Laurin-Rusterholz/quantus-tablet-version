@@ -45,6 +45,49 @@ endete, ist heute eine eigenstaendige, bedienbare Ansicht (`native-modules.js`):
 Die Vollversion von AI Sync bleibt ueber „↗" erreichbar, ist aber nirgends
 mehr noetig, um eine App zu benutzen.
 
+## Lernen auf dem Tablet
+
+Vier Lern-Apps waren zwar da, liessen sich aber nicht benutzen — sie zeigten
+die Verpackung, nicht den Inhalt. Das ist behoben:
+
+* **BM Vorbereitung** ist eine eigene App (`bm-app.js`) mit sechs Bereichen:
+  Uebersicht mit Pruefungs-Countdown und Tagesthemen, Tageslektion mit Theorie
+  und Fragen, Themen aus dem Kompendium (6 Faecher, 158 Themen, 1046 Aufgaben),
+  Wiederholen als Leitner-Quiz, Merksaetze und Fortschritt. Gelesen wird aus
+  `bmpruefung/` und `theorie/kompendium.json`, geschrieben nach
+  `bmpruefung/aufg/<key>` — **mit demselben Leitner-Verfahren wie `bm.html`**
+  (`LEITNER = [1,2,4,7,14,30]`, `MASTER = 0.6`) und derselben
+  Schluesselnormierung. Ein eigener Lernstand waere ein zweiter, den niemand
+  mehr zusammenfuehrt.
+* **Smarter** zeigt den Lernstoff. Er steht in `documentHtml` (abgeschottet im
+  Rahmen, weil das Dokument eigene Stile mitbringt) oder `theoryHtml`. Die
+  Fragen lassen sich selbst beantworten — die Antwort geht nach
+  `smarter/documents/<tag>/answers/<qid>` —, die Musterantwort deckt man
+  danach auf.
+* **Leseplan** oeffnet die Leseeinheit wirklich: die Abschnitte aus
+  `sektionen[]` in der Reihenfolge von `plan[i].sektionIds`, mit
+  Blaettern, Abhaken und der KI-Aufbereitung, falls vorhanden.
+* **Journal** stellt Absaetze als Absaetze dar. Der Inhalt ist HTML aus dem
+  contenteditable des Journal Booklet; er wird als HTML gelesen und
+  bearbeitet, nicht als Text mit sichtbaren Tags.
+
+Das Kompendium (rund 1,8 MB) wird erst geladen, wenn die BM-App offen ist.
+
+## Sticky Boards
+
+Boards haengen in Quantus an einem Element — an einer Aufgabe, einem Projekt,
+einer Strategie oder einem Konzept. Auf dem Tablet kam man deshalb nur ueber
+dieses Element daran. Jetzt gibt es eine eigene App: **erst alle Boards mit
+einer Vorschau aus den echten Notiz-Positionen, dann eines im Vollbild.**
+
+Im Board: Notizen anlegen, am Griff verschieben, direkt beschriften, Farbe
+wechseln, loeschen; die Flaeche laesst sich schieben und zoomen. Verbindungen
+werden gezeichnet, aber hier nicht bearbeitet — beim Sichern wird immer das
+ganze Board geschrieben, damit Verbindungen und Zeichnungen erhalten bleiben.
+
+Jede Notiz hat eine **Griffleiste**. Ohne sie bedeckt das Textfeld die ganze
+Notiz, und ein Zug markiert nur Text, statt zu verschieben.
+
 ## Homebildschirm anordnen
 
 Der Homebildschirm laesst sich frei einrichten: Der Schalter ▤ oben rechts
@@ -81,6 +124,8 @@ Ansicht hat, und sagt es, falls einmal eine fehlt.
 - iPad-artiger Homescreen mit Dashboard, Widgets, App-Raster und Dock
 - frei anzuordnender Homescreen: Ziehen, Aufheben-und-Ablegen, Dock, Zuruecksetzen
 - durchsuchbarer App-Bildschirm mit Zuletzt-benutzt, Gruppen und Raster/Liste
+- Sticky Boards als eigene App: alle Boards auf einen Blick, eines im Vollbild
+- BM Vorbereitung mit Kompendium, Leitner-Wiederholungen und Fortschritt
 - globales Tablet Canvas in jeder App und über die Hauptnavigation
 - handschriftliche Notizen mit Apple Pencil, Stift, Finger oder Maus
 - Stift- und Marker-Modus mit Farb-Schnellwahl und variabler Strichstärke

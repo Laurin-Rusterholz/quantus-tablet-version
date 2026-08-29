@@ -1,9 +1,9 @@
-const CACHE = "quantus-tablet-v17-native-apps-anordnen";
+const CACHE = "quantus-tablet-v19-lernen-sticky";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
-  "/quantus-tablet-expansion.css", "/native-modules.css",
+  "/quantus-tablet-expansion.css", "/native-modules.css", "/bm-app.css", "/sticky-app.css",
   "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/flowertech-app.js",
-  "/native-modules.js", "/app.js",
+  "/native-modules.js", "/bm-app.js", "/sticky-app.js", "/app.js",
   "/quantus-tablet-expansion.js",
   "/icon.svg", "/manifest.webmanifest"
 ];
