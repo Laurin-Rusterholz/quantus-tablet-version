@@ -938,11 +938,12 @@
           }).join("") : nothingSmall("Keine PDFs im Drive")) + "</div></aside>" +
         '<section class="reader-panel">' + (open && url
           ? '<div class="panel-head"><button class="icon-action" data-action="reader-wide" title="Liste ein-/ausblenden">◫</button>' +
-            '<button class="icon-action" data-action="reader-full" title="Vollbild">⛶</button>' +
-            '<button class="icon-action" data-action="external-url" data-url="' + attr(url) + '" aria-label="Original">↗</button>' +
             '<strong class="truncate">' + esc(docName(open)) + "</strong></div>" +
-            '<div class="reader-pdf" data-reader="true"><iframe title="' + attr(docName(open)) + '" src="' + attr(url) +
-            '#view=FitH" allowfullscreen></iframe></div>'
+            // Der Betrachter wird nach dem Zeichnen eingehaengt (mount). Er
+            // rendert die Seiten selbst — das iframe von frueher zeigte auf
+            // iPadOS nur die erste Seite und kannte keine Bedienung.
+            '<div class="nm-pdf-host" data-nm-pdf="' + attr(url) + '" data-nm-pdf-name="' + attr(docName(open)) + '">' +
+            (window.QuantusPdfViewer ? window.QuantusPdfViewer.placeholder(docName(open)) : "") + "</div>"
           : '<div class="reader-empty"><div><span style="font-size:48px">P</span><h2>Kein PDF gewaehlt</h2>' +
             "<p>Waehle links ein PDF aus Quantus Drive.</p></div></div>") +
         "</section></div></div>";

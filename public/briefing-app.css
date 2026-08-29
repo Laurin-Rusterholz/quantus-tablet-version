@@ -1,0 +1,60 @@
+/*
+ * Morgenbriefing. Kurz, ruhig, in der Reihenfolge, in der man morgens
+ * hinsieht — die ausfuehrliche Fassung steht unveraendert unter „Heute".
+ */
+
+/* Der Tag in einer Zeile. Antippbar, wo es weitergeht. */
+.mb-zahlen {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px; margin-bottom: 18px;
+}
+.mb-zahl {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-raised); color: var(--text); cursor: pointer;
+  text-align: left; transition: .16s ease;
+}
+.mb-zahl:hover { border-color: var(--border2); transform: translateY(-2px); }
+.mb-zahl strong { font: 700 30px/1 Georgia, serif; font-variant-numeric: tabular-nums; }
+.mb-zahl small { color: var(--muted); font-size: 11.5px; }
+/* Ueberfaelliges faellt auf — es ist das Einzige auf dieser Zeile, das drueckt. */
+.mb-zahl.warn strong { color: var(--coral); }
+.mb-zahl.warn { border-color: color-mix(in oklab, var(--coral) 45%, var(--border)); }
+span.mb-zahl { cursor: default; }
+span.mb-zahl:hover { transform: none; border-color: var(--border); }
+
+/* Der naechste Termin steht groesser als der Rest der Liste. */
+.mb-naechst { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; }
+.mb-zeit {
+  font: 700 26px/1 Georgia, serif; color: var(--accent);
+  font-variant-numeric: tabular-nums; flex: none;
+}
+.mb-naechst strong { display: block; font-size: 16px; line-height: 1.35; }
+.mb-naechst small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+.mb-bloecke { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.mb-bloecke span {
+  padding: 4px 10px; border-radius: 999px; font-size: 11.5px;
+  background: var(--surface-overlay); border: 1px solid var(--border); color: var(--text2);
+}
+
+.mb-leitgedanke {
+  margin-bottom: 12px; padding: 12px 14px; border-radius: var(--radius-sm);
+  border-left: 3px solid var(--sand); background: var(--surface-overlay);
+  font: italic 15px/1.6 Georgia, serif; color: var(--text2);
+}
+
+.mb-notiz {
+  width: 100%; resize: vertical; padding: 11px 13px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-overlay); color: var(--text);
+  font: 15px/1.65 var(--font);
+}
+.mb-notiz:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.mb-mehr { margin-top: 20px; display: flex; justify-content: center; }
+
+@media (max-width: 900px) {
+  .mb-zahlen { grid-template-columns: repeat(2, 1fr); }
+  .mb-zahl strong { font-size: 26px; }
+}

@@ -21,8 +21,16 @@
     {
       title: "Alltag",
       apps: [
+        /*
+         * BEFUND (Nutzer: "das morning briefing wird nicht am anfang
+         * angezeigt"): das Briefing stand in keiner dieser Seiten. Unbekannte
+         * Apps haengt normaliseLayout hinten an die LETZTE Seite — es lag
+         * also auf Seite vier, hinter allem. Jetzt steht es an erster Stelle,
+         * dort, wo man morgens zuerst hinschaut.
+         */
+        { key: "dailybriefing", label: "Morgenbriefing", icon: "☀", tone: "sand" },
         { key: "dashboard", label: "Dashboard", icon: "▤", tone: "violet" },
-        { key: "daily", label: "Heute", icon: "☀", tone: "sand" },
+        { key: "daily", label: "Heute", icon: "◑", tone: "sand" },
         { key: "tasks", label: "Aufgaben", icon: "✓", tone: "green" },
         { key: "projects", label: "Projekte", icon: "▧", tone: "blue" },
         { key: "calendar", label: "Kalender", icon: "31", tone: "red" },
@@ -358,7 +366,7 @@
       ? "Nicht angemeldet — melde dich an, um deinen Tag zu laden."
       : (!a.state.remoteReady ? "Noch keine Daten geladen." : "");
 
-    return '<button class="sb-briefing" data-action="go" data-route="daily">' +
+    return '<button class="sb-briefing" data-action="go" data-route="dailybriefing">' +
       '<span class="sb-bf-head">☀ Morgenbriefing</span>' +
       '<span class="sb-bf-nums">' +
         "<span><b>" + (b.meetings || []).length + "</b> Termine</span>" +
@@ -368,7 +376,7 @@
       "</span>" +
       (leerGrund ? '<span class="sb-bf-hint">' + esc(leerGrund) + "</span>"
                  : '<ul class="sb-bf-lines">' + zeilen.join("") + "</ul>") +
-      '<span class="sb-bf-more">Vollständiges Daily Briefing öffnen ›</span>' +
+      '<span class="sb-bf-more">Morgenbriefing öffnen ›</span>' +
       "</button>";
   }
 
