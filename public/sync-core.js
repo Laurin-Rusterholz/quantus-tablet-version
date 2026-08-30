@@ -27,6 +27,58 @@
   }
 
   /*
+   * TOMBSTONES (payload._deleteLog, Desktop-Format { <typ>: { <id>: ms } }).
+   *
+   * Der Desktop loescht HART (delete map[id]) und schuetzt sich ausschliesslich
+   * ueber dieses Log. Das Tablet kannte es bisher gar nicht: ein Offline-
+   * Replay legte eine desktop-geloeschte Notiz aus der Update-Op einfach neu
+   * an (Review P1-3), und Tablet-Loeschungen hinterliessen nur Soft-Flags,
+   * die _deleteLog-basierte Desktop-Pfade nicht sehen (Review P2-7).
+   * Buckets folgen der Desktop-Konvention (Singular); gelesen wird wie dort
+   * id-basiert ueber alle Buckets (flattenDeleteLog-Aequivalent).
+   */
+  const TOMBSTONE_BUCKETS = {
+    notes: "note", ideas: "idea", notebooks: "notebook", books: "book",
+    tasks: "task", projects: "project", scheduledMessages: "scheduledMessage"
+  };
+  const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  function tombstoneTime(payload, id) {
+    const log = isObject(payload && payload._deleteLog) ? payload._deleteLog : null;
+    if (!log) return 0;
+    let latest = 0;
+    for (const bucket of Object.values(log)) {
+      if (!isObject(bucket)) continue;
+      const ts = Number(bucket[id]) || 0;
+      if (ts > latest) latest = ts;
+    }
+    return latest;
+  }
+  function writeTombstone(payload, collection, id, at) {
+    if (!isObject(payload._deleteLog)) payload._deleteLog = {};
+    const bucket = TOMBSTONE_BUCKETS[collection] || String(collection || "entity");
+    if (!isObject(payload._deleteLog[bucket])) payload._deleteLog[bucket] = {};
+    payload._deleteLog[bucket][id] = at;
+    const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+    for (const key of Object.keys(payload._deleteLog)) {
+      const entries = payload._deleteLog[key];
+      if (!isObject(entries)) { delete payload._deleteLog[key]; continue; }
+      for (const entryId of Object.keys(entries)) {
+        if ((Number(entries[entryId]) || 0) < cutoff) delete entries[entryId];
+      }
+      if (!Object.keys(entries).length) delete payload._deleteLog[key];
+    }
+  }
+  function clearTombstone(payload, id) {
+    const log = isObject(payload && payload._deleteLog) ? payload._deleteLog : null;
+    if (!log) return;
+    for (const key of Object.keys(log)) {
+      const bucket = log[key];
+      if (isObject(bucket) && bucket[id] != null) delete bucket[id];
+      if (isObject(bucket) && !Object.keys(bucket).length) delete log[key];
+    }
+  }
+
+  /*
    * LISTENBEREICHE.
    *
    * Die nativen Modulansichten (Journal, Reflecta, Reviews, Leseliste,
@@ -175,6 +227,13 @@
     const map = payload.entities[collection];
     const existing = isObject(map[operation.id]) ? map[operation.id] : null;
     const opTime = operationTime(operation);
+    // Ein Grabstein, der juenger als die Operation ist, gewinnt: die Entitaet
+    // wurde auf einem anderen Geraet danach geloescht und darf durch das
+    // Replay nicht wiederauferstehen (Review P1-3).
+    const tombTs = tombstoneTime(payload, operation.id);
+    if (operation.action !== "delete" && tombTs > opTime) {
+      return { applied: false, reason: "tombstoned" };
+    }
     if (existing && currentTime(existing) > opTime) return { applied: false, reason: "newer-remote-version" };
 
     const base = existing ? clone(existing) : { id: operation.id, createdAt: operation.updatedAt };
@@ -189,7 +248,20 @@
       map[operation.id].deleted = true;
       map[operation.id].status = "deleted";
       map[operation.id].deletedAt = operation.updatedAt;
+      writeTombstone(payload, collection, operation.id, opTime || Date.now());
+      return { applied: true, reason: "entity-updated" };
     }
+    const next = map[operation.id];
+    if (existing && (existing.deleted || existing.status === "deleted" || existing.deletedAt)) {
+      // Delete-vs-Update ueber Zeitstempel: die Operation ist hier nachweislich
+      // neuer (aeltere wurden oben abgewiesen) — das Update reaktiviert die
+      // soft-geloeschte Entitaet, statt die Flags aus der Basis mitzuschleppen
+      // (Review P3/D2). Undo/Restore raeumt so auch seinen Grabstein.
+      if (!("deleted" in patch)) delete next.deleted;
+      if (!("deletedAt" in patch)) delete next.deletedAt;
+      if (!("status" in patch) && next.status === "deleted") delete next.status;
+    }
+    if (tombTs) clearTombstone(payload, operation.id);
     return { applied: true, reason: "entity-updated" };
   }
 
@@ -208,6 +280,7 @@
       if (!result.applied) return { applied:false, reason:result.reason || "entity-batch-conflict" };
     }
     payload.entities = staged.entities;
+    if (isObject(staged._deleteLog)) payload._deleteLog = staged._deleteLog;
     return { applied:true, reason:"entity-batch-updated" };
   }
 
