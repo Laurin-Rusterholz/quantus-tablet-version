@@ -51,6 +51,9 @@ const WEG = [
   schnipsel("queueOperation", "  function queueOperation(operation) {"),
   schnipsel("executeOperation", "  async function executeOperation(operation, options) {"),
   schnipsel("transactionOperation", "  function transactionOperation(operation) {"),
+  // Neu seit der Konfliktablage (Review P2-7): executeOperation haelt
+  // abgewiesene Fassungen fest, statt sie still zu verwerfen.
+  schnipsel("recordConflict", "  function recordConflict(operation, reason) {"),
   schnipsel("flushPending", "  async function flushPending() {"),
 ].join("\n");
 
@@ -93,11 +96,12 @@ function harness(fb, { pending = [], online = true, user = { uid: "u1" } } = {})
   const protokoll = { toasts: [], sync: [], gespeichert: [] };
   const api = new Function(
     "state", "db", "Core", "navigator", "LOCAL_KEYS", "PENDING_MAX_OPS", "APP_STORE_PATH",
-    "scheduleRender", "queueSave", "saveJson", "setSync", "toast",
+    "scheduleRender", "queueSave", "saveJson", "loadJson", "setSync", "toast",
     WEG + "\nreturn { executeOperation, flushPending, queueOperation };")(
-    state, fb.db, Core, { onLine: online }, { pending: "qt-pending" }, 500, "appStore/app-data_json",
+    state, fb.db, Core, { onLine: online }, { pending: "qt-pending", conflicts: "qt-conflicts" }, 500, "appStore/app-data_json",
     () => {}, () => {},
     (schluessel, wert) => protokoll.gespeichert.push([schluessel, (wert || []).length]),
+    () => [],
     (status, text) => { state.syncStatus = status; protokoll.sync.push(status); },
     (...a) => protokoll.toasts.push(a));
   return { api, state, protokoll };

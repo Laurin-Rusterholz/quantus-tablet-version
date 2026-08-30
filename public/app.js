@@ -25,7 +25,8 @@
     device: "quantus-tablet-device-v1",
     snapshot: "quantus-tablet-snapshot-v1",
     drafts: "quantus-tablet-drafts-v1",
-    pins: "quantus-tablet-pins-v1"
+    pins: "quantus-tablet-pins-v1",
+    conflicts: "quantus-tablet-conflicts-v1"
   };
   // Obergrenzen fuer die lokale Speicherung: Snapshot nur bis ~3.5 MB in
   // localStorage ablegen, Warteschlange nie unbegrenzt wachsen lassen.
@@ -753,6 +754,16 @@
 
   async function executeOperation(operation, options) {
     const optimistic = Core.applyOperation(state.payload, operation);
+    // Schon lokal abgewiesen (neuerer Stand oder Grabstein): ehrlich melden
+    // und die unterlegene Fassung aufbewahren, statt "Gespeichert" zu zeigen.
+    if (optimistic.applied === false) {
+      recordConflict(operation, optimistic.reason);
+      toast("Nicht übernommen", optimistic.reason === "tombstoned"
+        ? "Der Eintrag wurde auf einem anderen Gerät gelöscht. Deine Fassung liegt in der Konfliktablage."
+        : "Ein anderes Gerät hat eine neuere Fassung. Deine Fassung liegt in der Konfliktablage.", "error");
+      scheduleRender();
+      return false;
+    }
     state.payload = optimistic.payload;
     scheduleRender();
 
@@ -769,6 +780,12 @@
       state.pending = state.pending.filter((item) => item.operationId !== operation.operationId);
       saveJson(LOCAL_KEYS.pending, state.pending);
       state.lastSync = new Date();
+      if (result.rejectedReason) {
+        recordConflict(operation, result.rejectedReason);
+        setSync("synced", "Serverstand behalten — Änderung in der Konfliktablage");
+        toast("Nicht übernommen", "AI Sync hatte bereits eine neuere Fassung. Deine Fassung liegt in der Konfliktablage.", "error");
+        return false;
+      }
       setSync("synced", "Änderung auf Tablet und AI Sync gespeichert");
       if (!(options && options.silent)) toast("Gespeichert", "Die Änderung ist mit AI Sync synchronisiert.", "ok");
       return true;
@@ -792,17 +809,37 @@
   // polaris/inbox ist ausschliesslich der n8n-/Voice-Eingang.
   function transactionOperation(operation) {
     const ref = db.ref(APP_STORE_PATH);
+    // Jede Ablehnung (newer-remote-version, tombstoned, ungueltig) laesst den
+    // Serverstand unangetastet — vorher wurde er bei anderen Gruenden neu
+    // verpackt — und der Grund wandert zum Aufrufer, damit KEIN Erfolgspfad
+    // mehr "Gespeichert" melden kann, wenn die Aenderung verworfen wurde
+    // (Review P2-7: stiller Konfliktverlust).
+    let rejectedReason = null;
     return new Promise((resolve, reject) => {
       ref.transaction((current) => {
         const parsed = Core.parseWrapper(current);
         const result = Core.applyOperation(parsed.payload, operation);
-        if (!result.applied && result.reason === "newer-remote-version") return current;
+        rejectedReason = result.applied ? null : (result.reason || "rejected");
+        if (!result.applied) return current;
         return Core.buildWrapper(result.payload, state.deviceId, operation.updatedAt);
       }, (error, committed, snapshot) => {
         if (error) reject(error);
-        else resolve({ committed, snapshot });
+        else resolve({ committed, snapshot, rejectedReason });
       }, false);
     });
+  }
+
+  // Konfliktablage (Review P2-7): die unterlegene lokale Fassung wird nie
+  // still verworfen, sondern begrenzt (100) lokal aufbewahrt.
+  function recordConflict(operation, reason) {
+    const list = loadJson(LOCAL_KEYS.conflicts, []);
+    const entries = Array.isArray(list) ? list : [];
+    entries.push({
+      kind: "local-superseded", reason: reason || "rejected", at: new Date().toISOString(),
+      operation: { kind: operation.kind, action: operation.action || null, collection: operation.collection || null, id: operation.id || null, patch: operation.patch || null, updatedAt: operation.updatedAt || null }
+    });
+    saveJson(LOCAL_KEYS.conflicts, entries.slice(-100));
+    return entries.length;
   }
 
   async function flushPending() {
@@ -811,9 +848,11 @@
     saveJson(LOCAL_KEYS.pending, state.pending);
     const queue = state.pending.slice();
     setSync("syncing", `${queue.length} vorgemerkte Änderung(en) werden synchronisiert`);
+    let rejected = 0;
     for (const operation of queue) {
       try {
-        await transactionOperation(operation);
+        const result = await transactionOperation(operation);
+        if (result.rejectedReason) { rejected++; recordConflict(operation, result.rejectedReason); }
         state.pending = state.pending.filter((item) => item.operationId !== operation.operationId);
         saveJson(LOCAL_KEYS.pending, state.pending);
       } catch (error) {
@@ -823,7 +862,8 @@
     }
     state.lastSync = new Date();
     setSync("synced", "Alle vorgemerkten Änderungen wurden synchronisiert");
-    toast("Wieder synchron", "Alle Offline-Änderungen sind in AI Sync angekommen.", "ok");
+    if (rejected) toast("Teilweise übernommen", `${rejected} Änderung(en) unterlagen einer neueren Fassung und liegen in der Konfliktablage.`, "error");
+    else toast("Wieder synchron", "Alle Offline-Änderungen sind in AI Sync angekommen.", "ok");
   }
 
   function loginBanner() {
@@ -2617,8 +2657,9 @@
       const undo = deleteUndo.get(button.dataset.undoToken) || [{ collection:button.dataset.collection, id:button.dataset.id, patch:{ deleted:false, archived:false, status:"open", deletedAt:null } }];
       deleteUndo.delete(button.dataset.undoToken);
       const operations = undo.map((target) => ({ collection:target.collection, id:target.id, action:"update", patch:target.patch }));
-      await executeOperation(operations.length > 1 ? makeEntityBatch(operations) : makeOperation("entity","update",operations[0].collection,operations[0].id,operations[0].patch),{silent:true});
-      toast("Wiederhergestellt", "Der Eintrag ist zurück.", "ok");
+      const restored = await executeOperation(operations.length > 1 ? makeEntityBatch(operations) : makeOperation("entity","update",operations[0].collection,operations[0].id,operations[0].patch),{silent:true});
+      // Ein abgelehnter Batch meldete frueher trotzdem Erfolg (Review P3/Probe F).
+      if (restored) toast("Wiederhergestellt", "Der Eintrag ist zurück.", "ok");
       return;
     }
     if (action === "pin-entity") {
