@@ -82,6 +82,13 @@
     { key: "pdfeditor", label: "PDF-Editor", icon: "PDF", tone: "coral", fullRoute: "pdfeditor", group: "Werkzeuge" },
     { key: "browser", label: "Browser", icon: "◎", tone: "blue", fullRoute: "browser", group: "Werkzeuge" },
     { key: "briefings", label: "Briefings", icon: "B", tone: "green", fullRoute: "briefings", group: "Werkzeuge" },
+    // Eigener Eintrag, eigene Route: "briefings" (oben) ist das Archiv
+    // vergangener Tage (native-modules.js, Text aus dem Datenstand). Das
+    // taeglich zugestellte PDF liegt in einer eigenen Firebase-Storage-
+    // Mailbox (briefingpdf-app.js) — ein zweites Modul auf derselben Route
+    // haette je nach Skriptreihenfolge in index.html eines der beiden
+    // stumm verdraengt.
+    { key: "briefingpdf", label: "Briefing-PDF", icon: "📬", tone: "green", fullRoute: "briefingpdf", group: "Werkzeuge" },
     { key: "quantusproject", label: "Quantus Projekt", icon: "Q", tone: "blue", fullRoute: "quantusproject", group: "Werkzeuge" },
     { key: "polaris", label: "Polaris", icon: "✦", tone: "green", fullRoute: "polaris", group: "Werkzeuge", allow: "microphone; clipboard-read; clipboard-write" }
   ];
@@ -159,7 +166,7 @@
     // Statistiken und Berichte rendert renderRoute() selbst. Sie fehlten hier,
     // und weil der App-Bildschirm seine Einordnung aus dieser Liste zieht,
     // meldete er sie faelschlich als "ohne eigene Tablet-Ansicht".
-    "statistics", "reports", "sticky",
+    "statistics", "reports", "sticky", "briefingpdf",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -968,6 +975,10 @@
         <section class="widget span-4">
           <div class="widget-head"><span class="widget-icon">▤</span><h2>Weiterlesen</h2><button data-action="go" data-route="reading">Bibliothek</button></div>
           <div class="item-list">${docs.slice(0, 3).map((doc) => `<div class="list-item" data-action="open-doc" data-id="${attr(doc.id || findMapKey(state.driveDocs,doc))}"><span>▧</span><div class="item-main"><div class="item-title">${esc(doc.titel_final || doc.dateiname || "Dokument")}</div><div class="item-meta">${esc(doc.bereich || doc.mimeType || "Quantus Drive")}</div></div></div>`).join("") || emptyMini("Keine Drive-Dokumente geladen")}</div>
+        </section>
+        <section class="widget span-4">
+          <div class="widget-head"><span class="widget-icon">📬</span><h2>Briefing-PDF</h2><button data-action="go" data-route="briefingpdf">Öffnen</button></div>
+          <p class="muted small">Dein tägliches Morgen-PDF aus AI Sync — direkt hier auf dem Tablet lesbar, statt nur unter Nachrichten.</p>
         </section>
         <section class="widget span-12" style="min-height:auto">
           <div class="widget-head"><span class="widget-icon">↻</span><h2>Zuletzt bearbeitet</h2><button data-action="go" data-route="reports">Alle</button></div>
