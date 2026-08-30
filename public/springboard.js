@@ -398,6 +398,7 @@
         'title="Homebildschirm anordnen" aria-label="Homebildschirm anordnen">▤</button>' +
       '<button class="sb-round" data-action="search" aria-label="Suchen">⌕</button>' +
       '<button class="sb-round" data-action="polaris" aria-label="Polaris">✦</button>' +
+      '<button class="sb-round" data-action="open-shortnote" aria-label="Shortnote: Notiz oder Mitteilung">✎</button>' +
       '<button class="sb-round" data-action="new-entity" data-collection="tasks" aria-label="Neue Aufgabe">＋</button>' +
       "</div></div>" +
       (arrangeMode

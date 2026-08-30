@@ -365,3 +365,46 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
 .sort-select { min-height:38px; max-width:180px; padding:6px 10px; border-radius:10px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text); font-size:12.5px; }
 .entity-card.pinned { border-color:var(--sand); }
 .toast .btn { margin-top:8px; }
+
+/* ── Quantus-weites Notizkonzept ───────────────────────────────────────── */
+.note-filterbar { align-items:flex-start; flex-wrap:wrap; }
+.note-filterbar .search-field { flex:1 1 300px; }
+.note-class-chips { flex:1 1 100%; }
+.note-select-filters { display:flex; gap:7px; flex-wrap:wrap; }
+.note-card { min-height:250px; }
+.note-tags { display:flex; gap:5px; flex-wrap:wrap; min-height:28px; }
+.note-tag,.tag-chip { min-height:30px; border:1px solid var(--border); border-radius:999px; background:var(--surface-soft); color:var(--accent); padding:4px 9px; font-size:11px; font-weight:700; cursor:pointer; }
+.note-source { margin-top:12px; color:var(--muted); font-size:11.5px; }
+.note-source.missing { color:var(--danger); }
+.readonly-field { min-height:46px; display:flex; align-items:center; padding:10px 12px; border:1px solid var(--border); border-radius:11px; background:var(--surface-soft); color:var(--text2); }
+.field-hint { display:block; margin-top:5px; color:var(--muted); font-size:10.5px; }
+.tag-editor { position:relative; min-height:48px; border:1px solid var(--border); border-radius:12px; background:var(--surface-raised); padding:5px 8px; }
+.tag-editor:focus-within { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+.tag-editor-chips { display:flex; gap:5px; flex-wrap:wrap; }
+.tag-editor > input[data-tag-autocomplete] { width:100%; min-height:38px; border:0; background:transparent; color:var(--text); padding:5px 3px; }
+.tag-editor > input[data-tag-autocomplete]:focus { outline:0; box-shadow:none; }
+.tag-suggestions { position:absolute; z-index:15; left:0; right:0; top:calc(100% + 5px); max-height:210px; overflow:auto; padding:6px; border:1px solid var(--border2); border-radius:12px; background:var(--surface-overlay); box-shadow:var(--shadow); }
+.tag-suggestions button { display:block; width:100%; min-height:42px; border:0; border-radius:9px; background:transparent; color:var(--text); padding:8px 10px; text-align:left; cursor:pointer; }
+.tag-suggestions button:hover,.tag-suggestions button:focus { background:var(--accent-soft); color:var(--accent); }
+.shortnote-type { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:15px; }
+.shortnote-type label { min-height:52px; display:flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--border); border-radius:13px; background:var(--surface-raised); font-weight:700; }
+.book-detail { min-height:100%; padding-bottom:24px; }
+.book-hero { display:flex; align-items:center; gap:22px; padding:24px; }
+.book-hero h1 { margin:8px 0 4px; font:700 clamp(27px,4vw,42px)/1.05 Georgia,serif; }
+.book-hero p { margin:0 0 4px; color:var(--muted); }
+.book-cover { width:112px; height:154px; flex:none; display:grid; place-items:center; border-radius:9px 16px 16px 9px; background:linear-gradient(145deg,var(--accent),var(--accent-deep)); color:#fff; font-size:38px; box-shadow:var(--shadow); }
+.book-metadata { display:flex; gap:8px; flex-wrap:wrap; padding:0 24px 20px; }
+.book-metadata > span { min-height:38px; display:flex; align-items:center; padding:6px 11px; border:1px solid var(--border); border-radius:10px; color:var(--muted); }
+.book-notes,.book-functions { margin:0 24px 18px; padding:16px; border:1px solid var(--border); border-radius:16px; background:var(--surface-raised); }
+.book-functions h2 { margin:0 0 6px; font-size:15px; }
+.book-functions p { margin:0; }
+.entity-linked-notes { margin-top:18px; padding-top:14px; border-top:1px solid var(--border); }
+.entity-linked-notes .list-item { width:100%; text-align:left; color:inherit; }
+
+@media (max-width:760px) {
+  .note-select-filters .sort-select { max-width:none; flex:1 1 140px; }
+  .book-hero { padding:18px; align-items:flex-start; }
+  .book-cover { width:78px; height:108px; font-size:28px; }
+  .book-metadata { padding:0 18px 16px; }
+  .book-notes,.book-functions { margin-left:18px; margin-right:18px; }
+}

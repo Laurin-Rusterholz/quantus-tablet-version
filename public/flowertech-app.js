@@ -328,6 +328,7 @@
           '" data-action="ft-set-stage" data-id="' + esc(project.id) + '" data-stage="' + stage[0] + '">' + esc(stage[1]) + "</button>";
       }).join("") + "</div>" +
       (a ? a.viewHeader(project.title || "Projekt", project.description || "FlowerTech-Projekt",
+        '<button class="btn" data-action="ft-project-note" data-id="' + esc(project.id) + '">＋✎ Notiz</button>' +
         '<button class="btn" data-action="ft-new-doc" data-kind="offer" data-project="' + esc(project.id) + '">＋ Offerte</button>' +
         '<button class="btn primary" data-action="ft-new-doc" data-kind="invoice" data-project="' + esc(project.id) + '">＋ Rechnung</button>') : "") +
       '<div class="dashboard-grid">' +
@@ -418,6 +419,27 @@
     if (action === "ft-tab") { ui.tab = button.dataset.tab; ui.projectId = null; rerender(); return true; }
     if (action === "ft-open-project") { ui.tab = "projects"; ui.projectId = button.dataset.id; rerender(); return true; }
     if (action === "ft-close-project") { ui.projectId = null; rerender(); return true; }
+
+    if (action === "ft-project-note") {
+      var project = projects().find(function (entry) { return entry.id === button.dataset.id; });
+      var noteApi = api();
+      if (project && noteApi && typeof noteApi.openNoteForm === "function") {
+        noteApi.openNoteForm({
+          noteClass: "research",
+          lockClass: true,
+          tags: [project.title || "FlowerTech"],
+          title: "Projektnotiz · " + (project.title || "FlowerTech"),
+          source: {
+            app: "flowertech",
+            entityType: "project",
+            entityId: project.id,
+            label: project.title || "FlowerTech-Projekt",
+            route: "#/flowertech"
+          }
+        });
+      }
+      return true;
+    }
 
     if (action === "ft-set-stage") {
       var a1 = api();

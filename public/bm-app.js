@@ -304,6 +304,34 @@
       esc(symbol) + "</span><h2>" + esc(titel) + "</h2>" + (aktionen || "") + "</div>" + inhalt + "</section>";
   }
 
+  function lernnotizOeffnen(kind, key) {
+    var a = api(); if (!a || typeof a.openNoteForm !== "function") return;
+    var label = "BM Vorbereitung", tags = ["BM Vorbereitung"], content = "", entityId = key || heute(), subtype = "merksatz";
+    if (kind === "lesson") {
+      var lesson = obj(obj(bmDaten().lessons)[key || heute()]);
+      label = lesson.titel || lesson.thema || "Tageslektion " + (key || heute());
+      tags.push(lesson.thema || label); content = lesson.zusammenfassung || ""; subtype = "zusammenfassung";
+    } else if (kind === "topic") {
+      var entry = kompendium.index && kompendium.index.byKey[key];
+      if (entry) { label = entry.thema.titel; tags.push(entry.fach, label); content = notizen()[fbKey(key)] || ""; }
+    } else if (kind === "question") {
+      var current = ui.quiz && ui.quiz.items[ui.quiz.idx];
+      if (current) {
+        label = current.eintrag ? current.eintrag.thema.titel : ui.quiz.titel;
+        tags.push(current.eintrag && current.eintrag.fach || "BM", label);
+        content = frageText(current.aufgabe) + "\n\n" + antwortText(current.aufgabe);
+        entityId = current.key || entityId; subtype = "fehler";
+      }
+    } else if (kind === "memorandum") {
+      var match = kompendium.index && kompendium.index.themen.find(function (entry) { return fbKey(entry.key) === key; });
+      label = match ? match.thema.titel : key.replace(/_/g, " / ");
+      if (match) tags.push(match.fach, label);
+      content = String(notizen()[key] || ""); entityId = key;
+    }
+    a.openNoteForm({ noteClass:"learning", lockClass:true, learningKind:subtype, title:"Lernnotiz · " + label, content:content,
+      tags:tags, source:{ app:"bmpruefung", entityType:kind || "preparation", entityId:entityId, label:label, route:"/bm.html" } });
+  }
+
   var BEREICHE = [
     { key: "uebersicht", label: "Übersicht", icon: "◆" },
     { key: "lektion", label: "Tageslektion", icon: "☀" },
@@ -415,7 +443,8 @@
         (lektion.theorie || lektion.inhalt || lektion.text
           ? '<div class="bm-theorie">' + md(lektion.theorie || lektion.inhalt || lektion.text) + "</div>"
           : leer("Diese Lektion enthält keinen Theorieteil.")) +
-        (lektion.zusammenfassung ? '<div class="bm-merk">' + md(lektion.zusammenfassung) + "</div>" : "")) +
+        (lektion.zusammenfassung ? '<div class="bm-merk">' + md(lektion.zusammenfassung) + "</div>" : ""),
+        '<button class="btn small-btn" data-action="bm-learning-note" data-kind="lesson" data-key="' + attr(tag) + '">＋ Lernnotiz</button>') +
       (uebung.length
         ? kachel(6, "✎", "Übungsfragen (" + uebung.length + ")",
             '<button class="btn primary" data-action="bm-quiz-lektion" data-art="uebung">Übungsfragen starten</button>' +
@@ -527,6 +556,7 @@
         (thema.kapitel ? " · " + esc(thema.kapitel) : "") + "</small></div>" +
         '<div class="bm-thema-aktionen">' +
           '<span class="badge ' + (m >= MASTER ? "accent" : "") + '">' + Math.round(m * 100) + " %</span>" +
+          '<button class="btn" data-action="bm-learning-note" data-kind="topic" data-key="' + attr(key) + '">＋ Lernnotiz</button>' +
           (aufgaben.length
             ? '<button class="btn primary" data-action="bm-quiz-thema" data-key="' + attr(key) + '">' +
               aufgaben.length + " Aufgaben üben</button>"
@@ -679,7 +709,7 @@
             '<button class="btn primary" data-action="bm-quiz-note" data-ok="1">Ja</button></div>'
           : "") +
         (quiz.aufgedeckt && optionen.length
-          ? '<div class="row-actions"><button class="btn primary" data-action="bm-quiz-weiter">Weiter ›</button></div>'
+          ? '<div class="row-actions"><button class="btn" data-action="bm-learning-note" data-kind="question">Als Lernnotiz</button><button class="btn primary" data-action="bm-quiz-weiter">Weiter ›</button></div>'
           : "") +
       "</div></div>";
   }
@@ -727,10 +757,10 @@
               var eintrag = kompendium.index
                 ? kompendium.index.themen.find(function (e) { return fbKey(e.key) === key; })
                 : null;
-              return '<div class="list-item"' + (eintrag ? ' data-action="bm-thema" data-key="' + attr(eintrag.key) + '"' : "") + ">" +
+              return '<div class="list-item">' +
                 '<span class="badge accent">✦</span><div class="item-main">' +
                 '<div class="item-title">' + esc(eintrag ? eintrag.thema.titel : key.replace(/_/g, " / ")) + "</div>" +
-                '<div class="item-meta">' + esc(String(alle[key]).slice(0, 200)) + "</div></div></div>";
+                '<div class="item-meta">' + esc(String(alle[key]).slice(0, 200)) + '</div></div><button class="btn small-btn" data-action="bm-learning-note" data-kind="memorandum" data-key="' + attr(key) + '">In Noteflow</button></div>';
             }).join("") + "</div>"
           : leer("Noch keine Merksätze — schreib sie beim Lernen direkt beim Thema auf.")) +
       "</div>";
@@ -784,7 +814,7 @@
     var a = api();
     return '<div class="view bm-view">' +
       kopf("BM Vorbereitung", "Lernplan, Tageslektion, Kompendium und Wiederholungen — derselbe Lernstand wie in Quantus.",
-        '<button class="btn" data-action="external" data-path="bm.html">↗ Vollversion</button>') +
+        '<button class="btn" data-action="bm-learning-note" data-kind="preparation">＋ Lernnotiz</button><button class="btn" data-action="external" data-path="bm.html">↗ Vollversion</button>') +
       (a && !a.state.user ? a.loginBanner() : "") +
       reiter() + inhalt + "</div>";
   }
@@ -798,6 +828,7 @@
     if (action === "bm-thema") { ui.bereich = "themen"; ui.thema = button.dataset.key; a.render(); return true; }
     if (action === "bm-zurueck") { ui.thema = null; a.render(); return true; }
     if (action === "bm-reload") { kompendium.fehler = null; kompendium.daten = null; ladeKompendium(); a.render(); return true; }
+    if (action === "bm-learning-note") { lernnotizOeffnen(button.dataset.kind, button.dataset.key); return true; }
 
     if (action === "bm-quiz-due") {
       var quiz = quizAusFaelligen();

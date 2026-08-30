@@ -435,6 +435,7 @@
                 ' · ' + esc(String(unit.datum || "ohne Datum")) + ' · ≈ ' + esc(String(unit.estMinutes || 0)) + ' Min' +
                 ' · ' + fertig + ' gelesen</small></div>' +
                 '<div class="qt-lp-read-actions">' +
+                  '<button class="btn" data-qt-action="lp-note" data-idx="' + idx + '">＋ Lernnotiz</button>' +
                   '<button class="btn" data-qt-action="lp-step" data-step="-1"' + (idx > 0 ? "" : " disabled") + '>‹</button>' +
                   '<button class="btn' + (unit.done ? "" : " primary") + '" data-qt-action="lp-done" data-idx="' + idx +
                     '" data-done="' + (unit.done ? "0" : "1") + '">' +
@@ -473,7 +474,8 @@
               '<p class="muted">Tag ' + esc(String(next.day.day || next.completed + 1)) + ' · ' +
               esc(String(next.day.estimatedMinutes || 30)) + ' Min.</p>' +
               fortschritt(next.total ? next.completed / next.total : 0) +
-              '<small class="muted">' + next.completed + ' von ' + next.total + ' Tagen</small>'
+              '<small class="muted">' + next.completed + ' von ' + next.total + ' Tagen</small>' +
+              '<div class="row-actions" style="margin-top:12px"><button class="btn" data-qt-action="career-note">＋ Lernnotiz</button></div>'
             : leerHinweis("Kein Fachmodul aktiv — in der Vollversion eines importieren.")) +
         '</section>' +
         '<section class="widget span-4"><div class="widget-head"><span class="widget-icon">◍</span><h2>Reflecta</h2></div>' +
@@ -600,6 +602,22 @@
     }
     if (aktion === "lp-done") {
       leseplanEinheitSetzen(state.leseplanDoc, Number(knopf.dataset.idx), knopf.dataset.done === "1");
+      return;
+    }
+    if (aktion === "lp-note") {
+      var q = api(), lpDoc = leseplanDoc(state.leseplanDoc), unitIndex = Number(knopf.dataset.idx), lpUnit = lpDoc && asArray(lpDoc.plan)[unitIndex];
+      if (!q || !lpDoc || !lpUnit || typeof q.openNoteForm !== "function") return;
+      var label = titleOf(lpDoc, "Leseplan") + " · Einheit " + (unitIndex + 1);
+      var content = leseplanEinheitHtml(lpDoc, lpUnit).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 800);
+      q.openNoteForm({ noteClass:"learning", lockClass:true, content:content, tags:[titleOf(lpDoc,"Leseplan")],
+        source:{ app:"leseplan", entityType:"unit", entityId:state.leseplanDoc + ":" + unitIndex, label:label, route:"#/leseplan" } });
+      return;
+    }
+    if (aktion === "career-note") {
+      var qa = api(), next = nextCareerSession(); if (!qa || !next || typeof qa.openNoteForm !== "function") return;
+      var careerLabel = titleOf(next.module,"Career Model") + " · " + titleOf(next.day,"Tag");
+      qa.openNoteForm({ noteClass:"learning", lockClass:true, tags:[titleOf(next.module,"Career Model")],
+        source:{ app:"career", entityType:"lesson", entityId:(next.module.id || "module") + ":" + (next.day.id || next.day.day || next.completed), label:careerLabel, route:"#/career" } });
       return;
     }
   });

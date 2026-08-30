@@ -1,8 +1,11 @@
 (function (root, factory) {
-  const api = factory();
+  const notesCore = typeof module === "object" && module.exports
+    ? require("./notes-core.js")
+    : root.QuantusNotesCore;
+  const api = factory(notesCore);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.QuantusSyncCore = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (Notes) {
   "use strict";
 
   function clone(value) {
@@ -21,6 +24,58 @@
     if (typeof value === "number" && Number.isFinite(value)) return value;
     const parsed = Date.parse(value || 0);
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  /*
+   * TOMBSTONES (payload._deleteLog, Desktop-Format { <typ>: { <id>: ms } }).
+   *
+   * Der Desktop loescht HART (delete map[id]) und schuetzt sich ausschliesslich
+   * ueber dieses Log. Das Tablet kannte es bisher gar nicht: ein Offline-
+   * Replay legte eine desktop-geloeschte Notiz aus der Update-Op einfach neu
+   * an (Review P1-3), und Tablet-Loeschungen hinterliessen nur Soft-Flags,
+   * die _deleteLog-basierte Desktop-Pfade nicht sehen (Review P2-7).
+   * Buckets folgen der Desktop-Konvention (Singular); gelesen wird wie dort
+   * id-basiert ueber alle Buckets (flattenDeleteLog-Aequivalent).
+   */
+  const TOMBSTONE_BUCKETS = {
+    notes: "note", ideas: "idea", notebooks: "notebook", books: "book",
+    tasks: "task", projects: "project", scheduledMessages: "scheduledMessage"
+  };
+  const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  function tombstoneTime(payload, id) {
+    const log = isObject(payload && payload._deleteLog) ? payload._deleteLog : null;
+    if (!log) return 0;
+    let latest = 0;
+    for (const bucket of Object.values(log)) {
+      if (!isObject(bucket)) continue;
+      const ts = Number(bucket[id]) || 0;
+      if (ts > latest) latest = ts;
+    }
+    return latest;
+  }
+  function writeTombstone(payload, collection, id, at) {
+    if (!isObject(payload._deleteLog)) payload._deleteLog = {};
+    const bucket = TOMBSTONE_BUCKETS[collection] || String(collection || "entity");
+    if (!isObject(payload._deleteLog[bucket])) payload._deleteLog[bucket] = {};
+    payload._deleteLog[bucket][id] = at;
+    const cutoff = Date.now() - TOMBSTONE_TTL_MS;
+    for (const key of Object.keys(payload._deleteLog)) {
+      const entries = payload._deleteLog[key];
+      if (!isObject(entries)) { delete payload._deleteLog[key]; continue; }
+      for (const entryId of Object.keys(entries)) {
+        if ((Number(entries[entryId]) || 0) < cutoff) delete entries[entryId];
+      }
+      if (!Object.keys(entries).length) delete payload._deleteLog[key];
+    }
+  }
+  function clearTombstone(payload, id) {
+    const log = isObject(payload && payload._deleteLog) ? payload._deleteLog : null;
+    if (!log) return;
+    for (const key of Object.keys(log)) {
+      const bucket = log[key];
+      if (isObject(bucket) && bucket[id] != null) delete bucket[id];
+      if (isObject(bucket) && !Object.keys(bucket).length) delete log[key];
+    }
   }
 
   /*
@@ -66,6 +121,8 @@
         tasks: {},
         projects: {},
         notes: {},
+        notebooks: {},
+        books: {},
         meetings: {},
         calendarEvents: {},
         concepts: {},
@@ -77,6 +134,7 @@
         ideas: {},
         decisions: {},
         articles: {},
+        nhOut: {},
         protocols: {},
         workflows: {},
         theses: {},
@@ -93,7 +151,10 @@
   function normalisePayload(input) {
     const payload = isObject(input) ? clone(input) : makeEmptyPayload();
     if (!isObject(payload.entities)) payload.entities = {};
-    ["tasks", "projects", "notes", "meetings", "calendarEvents", "concepts", "strategies", "goals", "programs", "organizations", "persons", "ideas", "decisions", "articles", "protocols", "workflows", "theses", "transactions", "accounts"]
+    // Die Note-Migration muss Array-Altbestaende sehen, bevor die allgemeine
+    // Map-Normalisierung laeuft; sonst wuerden sie hier versehentlich geleert.
+    if (Notes && typeof Notes.migratePayload === "function") Notes.migratePayload(payload);
+    ["tasks", "projects", "notes", "notebooks", "books", "meetings", "calendarEvents", "concepts", "strategies", "goals", "programs", "organizations", "persons", "ideas", "decisions", "articles", "nhOut", "protocols", "workflows", "theses", "transactions", "accounts", "scheduledMessages", "updates", "timeEntries"]
       .forEach((key) => { if (!isObject(payload.entities[key])) payload.entities[key] = {}; });
     if (!isObject(payload.dailyBriefing)) payload.dailyBriefing = {};
     if (!Array.isArray(payload.dailyBriefing.routines)) payload.dailyBriefing.routines = [];
@@ -128,7 +189,7 @@
     });
     if (!isObject(payload.flowertech.counters)) payload.flowertech.counters = {};
     if (!isObject(payload.flowertech.company)) payload.flowertech.company = {};
-    return payload;
+    return Notes && typeof Notes.migratePayload === "function" ? Notes.migratePayload(payload) : payload;
   }
 
   function parseWrapper(raw) {
@@ -166,6 +227,13 @@
     const map = payload.entities[collection];
     const existing = isObject(map[operation.id]) ? map[operation.id] : null;
     const opTime = operationTime(operation);
+    // Ein Grabstein, der juenger als die Operation ist, gewinnt: die Entitaet
+    // wurde auf einem anderen Geraet danach geloescht und darf durch das
+    // Replay nicht wiederauferstehen (Review P1-3).
+    const tombTs = tombstoneTime(payload, operation.id);
+    if (operation.action !== "delete" && tombTs > opTime) {
+      return { applied: false, reason: "tombstoned" };
+    }
     if (existing && currentTime(existing) > opTime) return { applied: false, reason: "newer-remote-version" };
 
     const base = existing ? clone(existing) : { id: operation.id, createdAt: operation.updatedAt };
@@ -177,10 +245,43 @@
       updatedAt: operation.updatedAt
     };
     if (operation.action === "delete") {
+      map[operation.id].deleted = true;
       map[operation.id].status = "deleted";
       map[operation.id].deletedAt = operation.updatedAt;
+      writeTombstone(payload, collection, operation.id, opTime || Date.now());
+      return { applied: true, reason: "entity-updated" };
     }
+    const next = map[operation.id];
+    if (existing && (existing.deleted || existing.status === "deleted" || existing.deletedAt)) {
+      // Delete-vs-Update ueber Zeitstempel: die Operation ist hier nachweislich
+      // neuer (aeltere wurden oben abgewiesen) — das Update reaktiviert die
+      // soft-geloeschte Entitaet, statt die Flags aus der Basis mitzuschleppen
+      // (Review P3/D2). Undo/Restore raeumt so auch seinen Grabstein.
+      if (!("deleted" in patch)) delete next.deleted;
+      if (!("deletedAt" in patch)) delete next.deletedAt;
+      if (!("status" in patch) && next.status === "deleted") delete next.status;
+    }
+    if (tombTs) clearTombstone(payload, operation.id);
     return { applied: true, reason: "entity-updated" };
+  }
+
+  function applyEntityBatchOperation(payload, operation) {
+    const operations = operation && operation.patch && operation.patch.operations;
+    if (!Array.isArray(operations) || !operations.length) return { applied:false, reason:"invalid-entity-batch" };
+    const staged = clone(payload);
+    for (const child of operations) {
+      if (!isObject(child) || !child.collection || !child.id || !["create","update","delete"].includes(child.action)) {
+        return { applied:false, reason:"invalid-entity-batch-child" };
+      }
+      const result = applyEntityOperation(staged, {
+        kind:"entity", action:child.action, collection:child.collection, id:child.id,
+        patch:isObject(child.patch) ? child.patch : {}, updatedAt:operation.updatedAt
+      });
+      if (!result.applied) return { applied:false, reason:result.reason || "entity-batch-conflict" };
+    }
+    payload.entities = staged.entities;
+    if (isObject(staged._deleteLog)) payload._deleteLog = staged._deleteLog;
+    return { applied:true, reason:"entity-batch-updated" };
   }
 
   function applyHabitOperation(payload, operation) {
@@ -366,6 +467,7 @@
     let result;
     if (!operation || !operation.kind) result = { applied: false, reason: "invalid-operation" };
     else if (operation.kind === "entity") result = applyEntityOperation(payload, operation);
+    else if (operation.kind === "entity-batch") result = applyEntityBatchOperation(payload, operation);
     else if (operation.kind === "habit") result = applyHabitOperation(payload, operation);
     else if (operation.kind === "briefing") result = applyBriefingOperation(payload, operation);
     else if (operation.kind === "flashcard") result = applyFlashcardOperation(payload, operation);
@@ -375,6 +477,10 @@
     else result = { applied: false, reason: "unsupported-operation" };
 
     if (result.applied) {
+      // Auch Operationen alter Clients, die noch das fruehere freie
+      // Notizformat senden, erscheinen sofort im kanonischen Modell. Die
+      // Migration ist idempotent und erzeugt keine Zeitstempel bei jedem Lauf.
+      if (Notes && typeof Notes.migratePayload === "function") Notes.migratePayload(payload);
       payload.meta.updatedAt = operation.updatedAt;
       payload.meta.lastTabletOperationId = operation.operationId || operation.id;
       // meta.lastSavedBy ist der einzige Fremdgeraete-Marker, den AI Sync
@@ -408,8 +514,12 @@
   function isValidOperation(operation) {
     if (!isObject(operation)) return false;
     if (!operation.id || typeof operation.id !== "string") return false;
-    if (!["entity", "habit", "briefing", "flashcard", "flowertech", "list", "timer"].includes(operation.kind)) return false;
+    if (!["entity", "entity-batch", "habit", "briefing", "flashcard", "flowertech", "list", "timer"].includes(operation.kind)) return false;
     if (operation.kind === "entity" && (!operation.collection || typeof operation.collection !== "string")) return false;
+    if (operation.kind === "entity-batch" && (!operation.patch || !Array.isArray(operation.patch.operations)
+      || !operation.patch.operations.length || operation.patch.operations.some((child) => !isObject(child)
+        || typeof child.collection !== "string" || typeof child.id !== "string"
+        || !["create","update","delete"].includes(child.action)))) return false;
     if (operation.kind === "flowertech" && !["offers", "invoices"].includes(operation.collection)) return false;
     // Eine Listenoperation darf nur in einen der bekannten Bereiche schreiben.
     // Ein freier Pfad waere ein Schreibrecht auf den ganzen Datenstand.
@@ -452,14 +562,14 @@
      */
     const keepInOrder = [];
     const seen = new Set();
-    all.filter((operation) => operation.kind === "briefing").forEach((operation) => {
+    all.filter((operation) => operation.kind === "briefing" || operation.kind === "entity-batch").forEach((operation) => {
       const key = operation.operationId || `${operation.kind}::${operation.action}::${operation.id}`;
       if (seen.has(key)) return;
       seen.add(key);
       keepInOrder.push(clone(operation));
     });
 
-    const list = all.filter((operation) => operation.kind !== "briefing");
+    const list = all.filter((operation) => operation.kind !== "briefing" && operation.kind !== "entity-batch");
     const groups = new Map();
     list.forEach((operation) => {
       const key = [operation.kind, operation.collection || "", operation.id].join("::");
@@ -546,6 +656,26 @@
       );
     });
     merged.meta = parseTime(a.meta.updatedAt) >= parseTime(b.meta.updatedAt) ? clone(a.meta) : clone(b.meta);
+    // Grabsteine bucketweise mit max-Zeitstempel vereinigen — der Auffangzweig
+    // unten wuerde note-Buckets von a durch b ueberschreiben (Review P3).
+    {
+      const logA = isObject(a._deleteLog) ? a._deleteLog : {};
+      const logB = isObject(b._deleteLog) ? b._deleteLog : {};
+      const buckets = new Set([...Object.keys(logA), ...Object.keys(logB)]);
+      if (buckets.size) {
+        merged._deleteLog = {};
+        buckets.forEach((bucket) => {
+          const entriesA = isObject(logA[bucket]) ? logA[bucket] : {};
+          const entriesB = isObject(logB[bucket]) ? logB[bucket] : {};
+          const out = {};
+          new Set([...Object.keys(entriesA), ...Object.keys(entriesB)]).forEach((id) => {
+            out[id] = Math.max(Number(entriesA[id]) || 0, Number(entriesB[id]) || 0);
+          });
+          if (Object.keys(out).length) merged._deleteLog[bucket] = out;
+        });
+        if (!Object.keys(merged._deleteLog).length) delete merged._deleteLog;
+      }
+    }
 
     /*
      * AUFFANGZWEIG — derselbe Befund wie in AI Sync (CLAUDE.md, Fallstrick 2).
@@ -598,7 +728,7 @@
     let totalEntities = 0;
     Object.keys(normalised.entities).forEach((name) => {
       const active = Object.values(normalised.entities[name]).filter((item) =>
-        isObject(item) && item.status !== "deleted" && !item.deletedAt).length;
+        isObject(item) && !item.deleted && !item.archived && item.status !== "deleted" && !item.deletedAt).length;
       if (active) perCollection[name] = active;
       totalEntities += active;
     });

@@ -1,8 +1,8 @@
-const CACHE = "quantus-tablet-v20-pdf-briefing";
+const CACHE = "quantus-tablet-v22-notizkonzept-fixes";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
   "/quantus-tablet-expansion.css", "/native-modules.css", "/bm-app.css", "/sticky-app.css", "/pdf-viewer.css", "/briefing-app.css",
-  "/pdf-viewer.js", "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/flowertech-app.js",
+  "/pdf-viewer.js", "/notes-core.js", "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/flowertech-app.js",
   "/native-modules.js", "/bm-app.js", "/sticky-app.js", "/briefing-app.js", "/app.js",
   "/quantus-tablet-expansion.js",
   "/icon.svg", "/manifest.webmanifest"

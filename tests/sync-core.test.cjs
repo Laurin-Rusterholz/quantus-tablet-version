@@ -62,8 +62,55 @@ function op(overrides = {}) {
   const payload = core.makeEmptyPayload();
   payload.entities.notes.n1 = { id: "n1", title: "Notiz", updatedAt: "2026-07-20T08:00:00.000Z" };
   const result = core.applyOperation(payload, op({ collection: "notes", id: "n1", action: "delete" }));
+  assert.equal(result.payload.entities.notes.n1.deleted, true);
   assert.equal(result.payload.entities.notes.n1.status, "deleted");
   assert.ok(result.payload.entities.notes.n1.deletedAt);
+}
+
+{
+  // Eine Idee ist ein Aggregat aus zentraler Notiz und Legacy-Shadow. Delete
+  // und Undo laufen in genau einer Sync-Transaktion und sind gerätekompatibel.
+  const payload = core.makeEmptyPayload();
+  payload.entities.notes["idea-note-i1"] = {
+    id:"idea-note-i1", noteClass:"idea", content:"Idee", tags:["Produkt"], dedupeKey:"ideas:i1",
+    source:{ app:"ideas", entityType:"idea", entityId:"i1", label:"Produkt" },
+    createdAt:"2026-08-29T08:00:00.000Z", updatedAt:"2026-08-29T08:00:00.000Z"
+  };
+  payload.entities.ideas.i1 = { id:"i1", noteId:"idea-note-i1", centralNoteId:"idea-note-i1", status:"open", updatedAt:"2026-08-29T08:00:00.000Z" };
+  const remove = core.applyOperation(payload, {
+    operationId:"idea-batch-delete", kind:"entity-batch", action:"update", id:"batch-delete",
+    updatedAt:"2026-08-29T10:00:00.000Z", patch:{ operations:[
+      { collection:"notes", id:"idea-note-i1", action:"delete", patch:{} },
+      { collection:"ideas", id:"i1", action:"delete", patch:{} }
+    ] }
+  });
+  assert.equal(core.compactQueue([{
+    operationId:"queued-batch", kind:"entity-batch", action:"update", id:"queued-batch",
+    updatedAt:"2026-08-29T10:00:00.000Z", patch:{ operations:[
+      { collection:"notes", id:"idea-note-i1", action:"delete", patch:{} },
+      { collection:"ideas", id:"i1", action:"delete", patch:{} }
+    ] }
+  }]).length, 1, "Aggregate-Delete geht offline nicht aus der Queue verloren");
+  for (const entity of [remove.payload.entities.notes["idea-note-i1"], remove.payload.entities.ideas.i1]) {
+    assert.equal(entity.deleted, true);
+    assert.equal(entity.status, "deleted");
+    assert.equal(entity.deletedAt, "2026-08-29T10:00:00.000Z");
+  }
+  const afterDesktopMigration = require("../public/notes-core.js").migratePayload(JSON.parse(JSON.stringify(remove.payload)));
+  assert.equal(Object.keys(afterDesktopMigration.entities.notes).filter((id) => !afterDesktopMigration.entities.notes[id].deleted).length, 0);
+  assert.equal(Object.keys(afterDesktopMigration.entities.ideas).length, 1, "gelöschter Shadow wird nicht dupliziert");
+
+  const restored = core.applyOperation(remove.payload, {
+    operationId:"idea-batch-undo", kind:"entity-batch", action:"update", id:"batch-undo",
+    updatedAt:"2026-08-29T11:00:00.000Z", patch:{ operations:[
+      { collection:"notes", id:"idea-note-i1", action:"update", patch:{ deleted:false, archived:false, status:"open", deletedAt:null } },
+      { collection:"ideas", id:"i1", action:"update", patch:{ deleted:false, archived:false, status:"open", deletedAt:null } }
+    ] }
+  });
+  assert.equal(restored.applied, true);
+  assert.equal(restored.payload.entities.notes["idea-note-i1"].deleted, false);
+  assert.equal(restored.payload.entities.ideas.i1.deleted, false);
+  assert.equal(restored.payload.entities.ideas.i1.centralNoteId, "idea-note-i1");
 }
 
 {
