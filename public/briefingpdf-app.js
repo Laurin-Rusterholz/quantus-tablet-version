@@ -145,7 +145,7 @@
         return '<div class="list-item">' +
           '<span style="font-size:22px">' + (neu ? "🆕" : "📄") + "</span>" +
           '<div class="item-main" data-action="bf-open" data-id="' + attr(item.id) + '" role="button" tabindex="0" style="cursor:pointer">' +
-            '<div class="item-title">' + esc(item.title || "Morning Briefing") + "</div>" +
+            '<div class="item-title">' + esc(item.title || "Morgen-Briefing") + "</div>" +
             '<div class="item-meta">' + esc(a.formatDate(item.createdAt || item.date)) + " · " + esc(fmtSize(item.size)) + "</div>" +
           "</div>" +
           '<button class="icon-action" data-action="bf-download" data-id="' + attr(item.id) + '" aria-label="Herunterladen">⬇</button>' +
