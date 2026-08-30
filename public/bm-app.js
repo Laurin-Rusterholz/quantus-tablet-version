@@ -329,7 +329,7 @@
       content = String(notizen()[key] || ""); entityId = key;
     }
     a.openNoteForm({ noteClass:"learning", lockClass:true, learningKind:subtype, title:"Lernnotiz · " + label, content:content,
-      tags:tags, source:{ app:"bmpruefung", entityType:kind || "preparation", entityId:entityId, label:label, route:"#/bm" } });
+      tags:tags, source:{ app:"bmpruefung", entityType:kind || "preparation", entityId:entityId, label:label, route:"/bm.html" } });
   }
 
   var BEREICHE = [

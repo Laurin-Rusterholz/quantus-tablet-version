@@ -656,6 +656,26 @@
       );
     });
     merged.meta = parseTime(a.meta.updatedAt) >= parseTime(b.meta.updatedAt) ? clone(a.meta) : clone(b.meta);
+    // Grabsteine bucketweise mit max-Zeitstempel vereinigen — der Auffangzweig
+    // unten wuerde note-Buckets von a durch b ueberschreiben (Review P3).
+    {
+      const logA = isObject(a._deleteLog) ? a._deleteLog : {};
+      const logB = isObject(b._deleteLog) ? b._deleteLog : {};
+      const buckets = new Set([...Object.keys(logA), ...Object.keys(logB)]);
+      if (buckets.size) {
+        merged._deleteLog = {};
+        buckets.forEach((bucket) => {
+          const entriesA = isObject(logA[bucket]) ? logA[bucket] : {};
+          const entriesB = isObject(logB[bucket]) ? logB[bucket] : {};
+          const out = {};
+          new Set([...Object.keys(entriesA), ...Object.keys(entriesB)]).forEach((id) => {
+            out[id] = Math.max(Number(entriesA[id]) || 0, Number(entriesB[id]) || 0);
+          });
+          if (Object.keys(out).length) merged._deleteLog[bucket] = out;
+        });
+        if (!Object.keys(merged._deleteLog).length) delete merged._deleteLog;
+      }
+    }
 
     /*
      * AUFFANGZWEIG — derselbe Befund wie in AI Sync (CLAUDE.md, Fallstrick 2).

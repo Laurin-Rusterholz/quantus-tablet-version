@@ -1338,11 +1338,19 @@
         ? Boolean(asMap(state.driveDocs)[source.entityId])
         : Boolean(asMap(state.payload.entities.books)[source.entityId]);
     }
-    if (source.app === "smarter") return Boolean(asMap(state.smarterDocs)[source.entityId]);
+    if (source.app === "smarter") {
+      // Fragen-Notizen tragen "lessonKey:frageId"; vor dem Firebase-Load ist
+      // smarterDocs leer — beides darf nicht als "Quelle fehlt" erscheinen.
+      const docs = asMap(state.smarterDocs);
+      if (!Object.keys(docs).length) return true;
+      const key = String(source.entityId);
+      return Boolean(docs[key] || docs[key.split(":")[0]]);
+    }
     if (source.app === "bmpruefung" || source.app === "recalllab" || source.app === "leseplan") return true;
     if (source.app === "calendar" || source.app === "googlecalendar") {
-      return Boolean(asMap(state.payload.entities.calendarEvents)[source.entityId]
-        || asMap(state.payload.entities.meetings)[source.entityId]);
+      // Reine Google-Kalender-Termine liegen nie in den Entities; der Sprung
+      // oeffnet ohnehin die Kalenderansicht — nie faelschlich "fehlt" melden.
+      return true;
     }
     if (source.app === "articles") {
       return Notes.sourceEntityCollections(source).some((name) => Boolean(asMap(state.payload.entities[name])[source.entityId]));
@@ -2163,7 +2171,7 @@
     const learningKind = opts.learningKind || existing && existing.learningKind || "merksatz";
     const body = `<form data-form="note" data-id="${attr(existing && existing.id || "")}" data-source-app="${attr(source.app)}" data-source-type="${attr(source.entityType || "")}" data-source-id="${attr(source.entityId || "")}" data-source-label="${attr(source.label || "")}" data-source-route="${attr(source.route || "")}">
       <div class="form-grid">
-        <div class="field"><label>Notizklasse</label>${fixedClass ? `<input type="hidden" name="noteClass" value="${attr(noteClass)}"><div class="readonly-field">${esc(noteClassLabel(noteClass))}</div>` : `<select name="noteClass" data-action="note-class-select">${Notes.NOTE_CLASSES.map((key) => `<option value="${key}" ${noteClass === key ? "selected" : ""}>${esc(Notes.NOTE_CLASS_LABELS[key])}</option>`).join("")}</select>`}</div>
+        <div class="field"><label>Notizklasse</label>${fixedClass ? `<input type="hidden" name="noteClass" value="${attr(noteClass)}"><div class="readonly-field">${esc(noteClassLabel(noteClass))}</div>` : `<select name="noteClass" data-action="note-class-select">${Notes.NOTE_CLASSES.filter((key) => key !== "general" || source.app === "noteflow").map((key) => `<option value="${key}" ${noteClass === key ? "selected" : ""}>${esc(Notes.NOTE_CLASS_LABELS[key])}</option>`).join("")}</select>`}</div>
         <div class="field"><label>Titel <small>(optional)</small></label><input name="title" value="${attr(opts.title == null ? existing && existing.title || "" : opts.title)}" placeholder="Wird sonst aus dem Inhalt gebildet"></div>
         <div class="field full"><label>Inhalt *</label><textarea name="content" rows="7" required>${esc(opts.content == null ? existing && noteContent(existing) || "" : opts.content)}</textarea></div>
         <div class="field" data-note-subtype="reading" ${noteClass === "reading" ? "" : "hidden"}><label>Art der Lesenotiz</label><select name="readingKind"><option value="note" ${readingKind === "note" ? "selected" : ""}>Eigene Notiz</option><option value="quote" ${readingKind === "quote" ? "selected" : ""}>Zitat</option><option value="summary" ${readingKind === "summary" ? "selected" : ""}>Zusammenfassung</option><option value="insight" ${readingKind === "insight" ? "selected" : ""}>Erkenntnis</option></select></div>
@@ -2367,7 +2375,10 @@
         label: form.dataset.sourceLabel || "Noteflow",
         route: form.dataset.sourceRoute || "#/notes"
       };
-      const tags = Notes.normalizeTags(data.get("tags"), noteTags());
+      // Der Fachkontext bleibt als Schlagwort erhalten, auch wenn er im
+      // Editor entfernt wurde — dieselbe lockedTags-Regel wie am Desktop.
+      const lockedContext = source.app !== "noteflow" && source.label && source.label !== "Noteflow" ? [source.label] : [];
+      const tags = Notes.normalizeTags([...lockedContext, ...Notes.normalizeTags(data.get("tags"), noteTags())], noteTags());
       try {
         const id = await saveCanonicalNote({
           noteClass,
@@ -2394,7 +2405,7 @@
           content,
           tags: [category],
           notebookId: null,
-          source: { app: "ideas", entityType: "idea", entityId: id, label: category, route: "#/ideas" },
+          source: { app: "ideas", entityType: "idea", entityId: id, label: category, route: "#/ideas/" + id },
           dedupeKey: `ideas:${id}`
         });
         closeOverlay(); noteSavedToast(id, "Idee in der Inbox gespeichert");
@@ -2435,8 +2446,9 @@
         closeOverlay();
         await executeOperation(makeOperation("entity", "create", "scheduledMessages", id, {
           title: Notes.titleFromContent(content, "Mitteilung"), content, deliverAt: date.toISOString(),
-          priority: "normal", isDelivered: false, isRead: false, isPinned: false,
-          recurrence: "none", sourceType: "tablet-shortnote"
+          scheduledAt: new Date().toISOString(), deliveredAt: null,
+          priority: 3, isDelivered: false, isRead: false, isPinned: false,
+          recurrence: "none", tags: ["shortnote"], sourceType: "tablet-shortnote"
         }));
         toast("Mitteilung geplant", `Zustellung ${formatDate(date, { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}`, "ok");
       } else {
@@ -2576,12 +2588,12 @@
     if (action === "open-book") { state.selectedBookId = button.dataset.id; state.selectedDocId = null; if (state.route !== "reading") go("reading"); else render(); return; }
     if (action === "reading-note") {
       const book = collection("books").find((item) => item.id === button.dataset.id); if (!book) return;
-      openNoteForm({ noteClass:"reading", lockClass:true, tags:[book.title], source:{ app:"readinghub", entityType:"book", entityId:book.id, label:book.title, route:"#/reading" } }); return;
+      openNoteForm({ noteClass:"reading", lockClass:true, tags:[book.title], source:{ app:"readinghub", entityType:"book", entityId:book.id, label:book.title, route:"#/readinghub/" + book.id } }); return;
     }
     if (action === "reading-document-note") {
       const doc = asMap(state.driveDocs)[button.dataset.id]; if (!doc) return;
       const title = doc.titel_final || doc.dateiname || "Dokument";
-      openNoteForm({ noteClass:"reading", lockClass:true, tags:[title], source:{ app:"readinghub", entityType:"document", entityId:button.dataset.id, label:title, route:"#/reading" } }); return;
+      openNoteForm({ noteClass:"reading", lockClass:true, tags:[title], source:{ app:"readinghub", entityType:"document", entityId:button.dataset.id, label:title, route:"#/readinghub/" + button.dataset.id } }); return;
     }
     if (action === "calendar-note") {
       const eventItem = collection("calendarEvents").find((item) => item.id === button.dataset.id)
@@ -2814,7 +2826,7 @@
       const book = state.selectedBookId && collection("books").find((item) => item.id === state.selectedBookId);
       const doc = state.selectedDocId && asMap(state.driveDocs)[state.selectedDocId];
       const label = book && book.title || doc && (doc.titel_final || doc.dateiname) || "Leseauswahl";
-      openNoteForm({ noteClass:"reading", lockClass:true, content:text, tags:[label], source:{ app:"readinghub", entityType:book ? "book" : "document", entityId:book && book.id || state.selectedDocId || null, label, route:"#/reading" } }); return;
+      openNoteForm({ noteClass:"reading", lockClass:true, content:text, tags:[label], source:{ app:"readinghub", entityType:book ? "book" : "document", entityId:book && book.id || state.selectedDocId || null, label, route:"#/readinghub/" + (book && book.id || state.selectedDocId || "") } }); return;
     }
     if (action === "flashcard-selection") { openFlashcardForm(null,{front:button.dataset.text||"",back:"",source:"Markierung aus Quantus Drive"}); return; }
     if (action === "polaris-selection") { openPolarisSheet(`Erkläre mir diesen Text: ${button.dataset.text||""}`); return; }

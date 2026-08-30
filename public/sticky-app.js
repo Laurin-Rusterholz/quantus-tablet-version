@@ -56,6 +56,7 @@
     return FARBEN.find(function (f) { return f.key === key; }) || FARBEN[0];
   }
 
+  var skSpeichernd = {};
   var ui = {
     offen: null,      // { collection, id }
     suche: "",
@@ -392,6 +393,9 @@
       if (!data) return true;
       var sticky = data.board.notes.find(function (note) { return note.id === button.dataset.id; });
       if (!sticky) return true;
+      // Zwei schnelle Tipps vor dem then() erzeugten zwei Notizen (Review P3).
+      if (skSpeichernd[sticky.id]) return true;
+      skSpeichernd[sticky.id] = true;
       if (sticky.noteId && obj(obj(a.state.payload).entities).notes && obj(obj(a.state.payload).entities).notes[sticky.noteId]) {
         a.go("notes"); return true;
       }
@@ -401,6 +405,7 @@
         source:{ app:"sticky", entityType:"postit", entityId:sticky.id, label:a.itemTitle(data.item,"Board"), route:"#/sticky" },
         dedupeKey:"sticky:" + ui.offen.collection + ":" + ui.offen.id + ":" + sticky.id
       }).then(function () {
+        delete skSpeichernd[sticky.id];
         sticky.noteId = noteId; sticky.updatedAt = new Date().toISOString();
         sichern(ui.offen.collection, ui.offen.id, data.board, true);
         a.toast("In Noteflow gespeichert", a.itemTitle(data.item,"Board"), "ok"); a.render();

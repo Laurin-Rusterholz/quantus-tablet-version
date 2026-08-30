@@ -41,7 +41,8 @@
   // Schnellzugriff-Stiftfarben und Markerfarben fuer die Handschrift.
   const INK_COLORS = ["#243c34", "#111417", "#1f6feb", "#d64545", "#2ea27b", "#b8860b"];
   const MARKER_COLORS = ["#ffe14d", "#7ee7c7", "#8bc6ff", "#ffa8a8", "#d7a8ff"];
-  const ui = {
+
+  const twSavingSticky = new Set();  const ui = {
     open: false,
     tab: "ink",
     collection: "projects",
@@ -504,11 +505,15 @@
       const entity = currentEntity(), board = normalBoard(entity?.stickyBoard), sticky = board.notes.find((item) => item.id === button.dataset.id), q = api();
       if (!entity || !sticky || !q) return;
       if (sticky.noteId && q.state.payload.entities.notes[sticky.noteId]) { q.go("notes"); close(); return; }
+      // Doppeltipp-Schutz: zwei schnelle Taps vor dem await erzeugten zwei Notizen (Review P3).
+      if (twSavingSticky.has(sticky.id)) return;
+      twSavingSticky.add(sticky.id);
       const noteId = makeId("note");
       await q.saveCanonicalNote({ id:noteId, noteClass:"research", title:`Post-it · ${titleOf(entity)}`, content:sticky.text,
         tags:[titleOf(entity)].concat(asArray(sticky.tags)), notebookId:null,
         source:{ app:"sticky", entityType:"postit", entityId:sticky.id, label:titleOf(entity), route:"#/sticky" },
         dedupeKey:`sticky:${ui.collection}:${entity.id}:${sticky.id}` });
+      twSavingSticky.delete(sticky.id);
       sticky.noteId = noteId; sticky.updatedAt = new Date().toISOString(); entity.stickyBoard = board;
       await savePatch({ stickyBoard:board }); q.toast("In Noteflow gespeichert", titleOf(entity), "ok"); return renderOverlay();
     }
