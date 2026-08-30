@@ -84,7 +84,6 @@
         { key: "docstudio", label: "DocStudio", icon: "D", tone: "coral" },
         { key: "nobraine", label: "No-Braine", icon: "N", tone: "green" },
         { key: "bm", label: "BM Lernen", icon: "∑", tone: "sand" },
-        { key: "briefingpdf", label: "Briefing-PDF", icon: "📬", tone: "green" },
         { key: "pdfeditor", label: "PDF", icon: "P", tone: "red" },
         { key: "browser", label: "Browser", icon: "◎", tone: "blue" },
         { key: "briefings", label: "Briefings", icon: "B", tone: "green" },

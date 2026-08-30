@@ -40,6 +40,7 @@ const briefingpdf = read("public/briefingpdf-app.js");
 const app = read("public/app.js");
 const nativeModules = read("public/native-modules.js");
 const springboard = read("public/springboard.js");
+const expansion = read("public/quantus-tablet-expansion.js");
 const html = read("public/index.html");
 const sw = read("public/sw.js");
 const pkg = read("package.json");
@@ -69,13 +70,18 @@ ok(/data-route="briefingpdf"/.test(app), "kein Shortcut zur Briefing-PDF-App auf
 
 // ── Der eigentliche Homebildschirm (Springboard, eigenes Modul mit
 //    routes:["home"] — renderHome() in app.js ist fuer "home" TOTER Code,
-//    moduleFor() findet springboard.js zuerst) bekommt ein eigenes Symbol ─
+//    moduleFor() findet springboard.js zuerst) zeigt das Lerncockpit ganz
+//    oben (quantus-tablet-expansion.js, injiziert vor den App-Seiten) —
+//    auf Nutzerwunsch sitzt der Shortcut DORT, direkt neben BM Vorbereitung,
+//    nicht (mehr) als Symbol auf der Werkzeuge-Seite ─────────────────────
 ok(/key:\s*"springboard"[\s\S]{0,20}routes:\s*\["home"\]/.test(springboard),
   "Testannahme veraltet: springboard.js beansprucht \"home\" nicht mehr wie erwartet — renderHome() waere dann kein toter Code mehr und der Shortcut muesste anders platziert sein");
-ok(/key:\s*"briefingpdf",\s*label:\s*"Briefing-PDF"/.test(springboard),
-  "DER BEFUND: ein Symbol nur im Dashboard (app.js) haette den echten Homebildschirm (Springboard) gar nicht erreicht — dort fehlt es");
 ok(/key:\s*"briefings",\s*label:\s*"Briefings"/.test(springboard),
-  "das bestehende Symbol fuer das Archiv wurde beim Ergaenzen versehentlich entfernt statt nur ergaenzt");
+  "das bestehende Symbol fuer das Archiv wurde versehentlich entfernt");
+ok(/function briefingPdfCard\(\)/.test(expansion) && /"briefingpdf"/.test(expansion),
+  "DER BEFUND: \"oben ins Lerncockpit\" — es gibt keine Briefing-PDF-Karte im Lerncockpit (quantus-tablet-expansion.js)");
+ok(/bmCard\(\)\s*\+\s*briefingPdfCard\(\)/.test(expansion),
+  "die Briefing-PDF-Karte steht nicht direkt neben BM Vorbereitung im Lerncockpit");
 
 // ── Einbindung in Shell und Service Worker ────────────────────────────────
 ok(/<script src="briefingpdf-app\.js">/.test(html), "briefingpdf-app.js ist nicht in index.html eingebunden");

@@ -59,6 +59,18 @@
     })[0] || null;
   }
 
+  // BEFUND (Nutzer: "ich kann auf dem tablet das morning briefing nicht
+  // oeffnen ... es soll eine spezielle app mit einem shortcut bekommen" —
+  // spaeter praezisiert: "oben ins lerncockpit", direkt neben BM
+  // Vorbereitung). Anders als die uebrigen Karten hat das Briefing-PDF
+  // keinen Platz im synchronisierten state (es liegt in AI Syncs
+  // Firebase-Storage-Mailbox, nicht im Quantus-Datenstand) — die Karte
+  // zeigt deshalb bewusst keinen Live-Zaehler, sondern fuehrt direkt in
+  // die App.
+  function briefingPdfCard() {
+    return card("Briefing-PDF", "Morgen-PDF öffnen", "Dein tägliches Briefing aus AI Sync", "📬", "blue", "go", "briefingpdf");
+  }
+
   function smarterCard() {
     var doc = latestSmarter();
     return card("Smarter", titleOf(doc, "Tagesstoff öffnen"), doc ? (doc.status === "delivered" ? "Heute bereit" : "Neuester Lernstoff") : "Noch kein Tagesdokument", "Σ", "violet", "go", "smarter");
@@ -141,7 +153,7 @@
   }
 
   function hubHtml() {
-    return '<section id="quantusLearningHub" class="qt-learning-hub"><div class="qt-learning-head"><div><span>LESEN &amp; WEITERBILDEN</span><h2>Dein Lerncockpit</h2><p>BM, Smarter, Leseplan, Career Model und Pinnboards werden live aktualisiert.</p></div><button type="button" data-qu-action="toggle" class="qt-device-summary">⇄ ' + esc(deviceSummary()) + '</button></div><div class="qt-learning-grid">' + bmCard() + smarterCard() + leseplanCard() + careerCard() + canvasCard() + '</div></section>';
+    return '<section id="quantusLearningHub" class="qt-learning-hub"><div class="qt-learning-head"><div><span>LESEN &amp; WEITERBILDEN</span><h2>Dein Lerncockpit</h2><p>BM, Smarter, Leseplan, Career Model und Pinnboards werden live aktualisiert; dein Briefing-PDF ist einen Tipp entfernt.</p></div><button type="button" data-qu-action="toggle" class="qt-device-summary">⇄ ' + esc(deviceSummary()) + '</button></div><div class="qt-learning-grid">' + bmCard() + briefingPdfCard() + smarterCard() + leseplanCard() + careerCard() + canvasCard() + '</div></section>';
   }
 
   function injectCareerIcon(springboard) {
