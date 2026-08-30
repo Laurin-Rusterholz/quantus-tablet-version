@@ -119,7 +119,7 @@
       return {
         ...clone(source),
         app,
-        entityType: cleanText(source.entityType || defaults.entityType) || null,
+        entityType: cleanText(source.entityType || defaults.entityType) || "note",
         entityId: source.entityId == null || source.entityId === "" ? (defaults.entityId || null) : String(source.entityId),
         label: cleanText(source.label || defaults.label) || "Noteflow",
         route: cleanText(source.route || defaults.route) || null,
@@ -129,7 +129,7 @@
     const legacy = cleanText(source);
     return {
       app: canonicalSourceApp(cleanText(defaults.app) || sourceAppFromLegacy(legacy)),
-      entityType: cleanText(defaults.entityType) || null,
+      entityType: cleanText(defaults.entityType) || "note",
       entityId: defaults.entityId == null || defaults.entityId === "" ? null : String(defaults.entityId),
       label: cleanText(defaults.label) || legacy || "Noteflow",
       route: cleanText(defaults.route) || null,
@@ -142,11 +142,20 @@
     const source = isObject(note && note.source)
       ? [note.source.app, note.source.entityType, note.source.label].join(" ")
       : String(note && note.source || "");
-    const evidence = [source, note && note.type, note && note.kind, note && note.bookId ? "book" : "", note && note.ideaId ? "idea" : ""].join(" ").toLowerCase();
-    if (/reading|book|buch|lesen/.test(evidence)) return "reading";
+    // Paritaet mit dem Desktop-Core (Review P2-8): auch tags, readingKind/
+    // learningKind/researchKind und readingHubBookId zaehlen als Evidenz, und
+    // die Reihenfolge entspricht inferLegacyClass (reading → idea → learning
+    // → research → short). Sonst stempelte das zuerst migrierende Geraet
+    // dieselbe Altnotiz anders (Tag "Lesenotiz": Tablet general, Desktop
+    // reading) — dauerhaft, weil beide die gesetzte Klasse danach respektieren.
+    const evidence = [source, note && note.type, note && note.kind,
+      note && note.readingKind, note && note.learningKind, note && note.researchKind,
+      ...(Array.isArray(note && note.tags) ? note.tags : []),
+      note && (note.bookId || note.readingHubBookId) ? "book" : "", note && note.ideaId ? "idea" : ""].join(" ").toLowerCase();
+    if (/reading|book|buch|lesenotiz|lesen /.test(evidence + " ")) return "reading";
+    if (/(^|[\s:_-])(idea|idee)([\s:_-]|$)/.test(evidence)) return "idea";
+    if (/smarter|bm|recall|learn|lern|lektion|leseplan/.test(evidence)) return "learning";
     if (/news|article|artikel|research|recherche|browser|pdf|thesis/.test(evidence)) return "research";
-    if (/idea|idee/.test(evidence)) return "idea";
-    if (/smarter|bm|recall|learn|lern|lektion/.test(evidence)) return "learning";
     if (/short|quick|schnell/.test(evidence)) return "short";
     return "general";
   }
