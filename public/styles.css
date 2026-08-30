@@ -238,9 +238,23 @@ label { display:block; font-size:12px; color:var(--muted); font-weight:700; marg
 .selection-tools button:hover { background:var(--accent-soft); color:var(--accent); }
 
 .concept-board { position:relative; min-height:620px; border:1px solid var(--border); border-radius:var(--radius); overflow:auto; background-color:var(--surface-raised); background-image:radial-gradient(var(--border) 1px,transparent 1px); background-size:24px 24px; }
-.concept-note { position:absolute; width:230px; min-height:140px; padding:15px; border:1px solid var(--border2); border-radius:16px; background:var(--surface-overlay); box-shadow:var(--shadow-soft); touch-action:none; }
+/* BEFUND (Nutzer: "ich kann die konzepte nicht mal richtig oeffnen, es wird
+   mir nur 1/100 angezeigt"): anders als .entity-card (feste Zeilenklammer,
+   Grid-Fluss) hatte .concept-note weder eine Textklammer noch eine
+   Hoechsthoehe. Ein langer Artikeltext liess die Karte ueber ihre 175px
+   Zeilenhoehe hinauswachsen und sich mit der Karte darunter ueberlagern —
+   auf dem absolut positionierten Board gibt es keinen Grid-Fluss, der das
+   sonst automatisch verhindert. Getippt wurde dann zufaellig auf, was gerade
+   obenauf lag. max-height als Ruecksicherung, -webkit-line-clamp wie bei
+   .entity-card als eigentliche Bremse. */
+/* Kein touch-action:none: anders als .sk-note in sticky-app.js lassen sich
+   Konzeptkarten nicht ziehen (kein Drag-Handler dafuer) — die Einschraenkung
+   blockierte hier nur das Scrollen des Boards, sobald eine Beruehrung auf
+   einer Karte begann. */
+.concept-note { position:absolute; width:230px; min-height:140px; max-height:170px; padding:15px; border:1px solid var(--border2); border-radius:16px; background:var(--surface-overlay); box-shadow:var(--shadow-soft); overflow:hidden; cursor:pointer; }
 .concept-note h3 { margin:0 0 8px; font:700 17px Georgia,serif; }
-.concept-note p { color:var(--text2); font-size:13px; }
+.concept-note p { color:var(--text2); font-size:13px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.concept-detail-text { margin-top:14px; font-size:15px; line-height:1.6; overflow-wrap:anywhere; }
 
 .budget-metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
 .budget-metric { border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-raised); padding:18px; }
