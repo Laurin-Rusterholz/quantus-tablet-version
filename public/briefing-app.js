@@ -212,17 +212,25 @@
       "</div>";
   }
 
-  function mount(route) {
-    // Beim Verlassen den gewaehlten Tag fallen lassen: sonst steht beim
-    // naechsten Oeffnen noch der Vortag da, den man sich einmal angesehen hat.
+  /*
+   * BEFUND: mount(route) wird laut render() in app.js NUR fuer das Modul
+   * aufgerufen, dessen Route gerade aktiv ist — route ist hier also IMMER
+   * "dailybriefing", nie etwas anderes. "route !== 'dailybriefing'" konnte
+   * folglich nie zutreffen; dbTag blieb ueber das Verlassen der App hinweg
+   * stehen (derselbe Fehler wie bei den Sticky Boards — siehe dort).
+   *
+   * hashchange feuert bei echter Navigation, unabhaengig davon, wie oft
+   * render()/mount() sonst neu laufen.
+   */
+  window.addEventListener("hashchange", function () {
+    var route = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
     var a = api();
     if (route !== "dailybriefing" && a && a.state.dbTag) a.state.dbTag = null;
-  }
+  });
 
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({
     key: "briefing",
     routes: ["dailybriefing"],
-    render: render,
-    mount: mount
+    render: render
   });
 })();

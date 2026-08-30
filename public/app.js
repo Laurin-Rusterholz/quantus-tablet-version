@@ -82,6 +82,13 @@
     { key: "pdfeditor", label: "PDF-Editor", icon: "PDF", tone: "coral", fullRoute: "pdfeditor", group: "Werkzeuge" },
     { key: "browser", label: "Browser", icon: "◎", tone: "blue", fullRoute: "browser", group: "Werkzeuge" },
     { key: "briefings", label: "Briefings", icon: "B", tone: "green", fullRoute: "briefings", group: "Werkzeuge" },
+    // Eigener Eintrag, eigene Route: "briefings" (oben) ist das Archiv
+    // vergangener Tage (native-modules.js, Text aus dem Datenstand). Das
+    // taeglich zugestellte PDF liegt in einer eigenen Firebase-Storage-
+    // Mailbox (briefingpdf-app.js) — ein zweites Modul auf derselben Route
+    // haette je nach Skriptreihenfolge in index.html eines der beiden
+    // stumm verdraengt.
+    { key: "briefingpdf", label: "Briefing-PDF", icon: "📬", tone: "green", fullRoute: "briefingpdf", group: "Werkzeuge" },
     { key: "quantusproject", label: "Quantus Projekt", icon: "Q", tone: "blue", fullRoute: "quantusproject", group: "Werkzeuge" },
     { key: "polaris", label: "Polaris", icon: "✦", tone: "green", fullRoute: "polaris", group: "Werkzeuge", allow: "microphone; clipboard-read; clipboard-write" }
   ];
@@ -159,7 +166,7 @@
     // Statistiken und Berichte rendert renderRoute() selbst. Sie fehlten hier,
     // und weil der App-Bildschirm seine Einordnung aus dieser Liste zieht,
     // meldete er sie faelschlich als "ohne eigene Tablet-Ansicht".
-    "statistics", "reports", "sticky",
+    "statistics", "reports", "sticky", "briefingpdf",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -969,6 +976,10 @@
           <div class="widget-head"><span class="widget-icon">▤</span><h2>Weiterlesen</h2><button data-action="go" data-route="reading">Bibliothek</button></div>
           <div class="item-list">${docs.slice(0, 3).map((doc) => `<div class="list-item" data-action="open-doc" data-id="${attr(doc.id || findMapKey(state.driveDocs,doc))}"><span>▧</span><div class="item-main"><div class="item-title">${esc(doc.titel_final || doc.dateiname || "Dokument")}</div><div class="item-meta">${esc(doc.bereich || doc.mimeType || "Quantus Drive")}</div></div></div>`).join("") || emptyMini("Keine Drive-Dokumente geladen")}</div>
         </section>
+        <section class="widget span-4">
+          <div class="widget-head"><span class="widget-icon">📬</span><h2>Briefing-PDF</h2><button data-action="go" data-route="briefingpdf">Öffnen</button></div>
+          <p class="muted small">Dein tägliches Morgen-PDF aus AI Sync — direkt hier auf dem Tablet lesbar, statt nur unter Nachrichten.</p>
+        </section>
         <section class="widget span-12" style="min-height:auto">
           <div class="widget-head"><span class="widget-icon">↻</span><h2>Zuletzt bearbeitet</h2><button data-action="go" data-route="reports">Alle</button></div>
           <div class="item-list">${recentActivity(5).map(({ name, config, item }) => `<div class="list-item" ${COLLECTION_CONFIG[name] ? `data-action="edit-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}"` : ""}><span class="badge accent">${esc(config.label)}</span><div class="item-main"><div class="item-title">${esc(itemTitle(item))}</div><div class="item-meta">${esc(relativeTime(item.updatedAt || item.createdAt))}</div></div></div>`).join("") || emptyMini("Noch keine Aktivität – lege direkt los.")}</div>
@@ -1507,7 +1518,7 @@
       <div class="concept-board">${concepts.map((item,index) => {
         const x = Number(item.x) || 28 + (index % 4) * 255;
         const y = Number(item.y) || 28 + Math.floor(index / 4) * 175;
-        return `<article class="concept-note" style="left:${x}px;top:${y}px"><span class="badge accent">${esc(item.category || "Konzept")}</span><h3>${esc(itemTitle(item,"Idee"))}</h3><p>${esc(itemText(item) || "Tippen, um den Gedanken auszuarbeiten.")}</p><div class="card-foot"><button class="icon-action" data-action="context-note" data-collection="concepts" data-id="${attr(item.id)}" aria-label="Notiz hinzufügen">＋✎</button><button class="icon-action" data-action="edit-entity" data-collection="concepts" data-id="${attr(item.id)}" aria-label="Konzept bearbeiten">✎</button></div></article>`;
+        return `<article class="concept-note" style="left:${x}px;top:${y}px" data-action="open-concept" data-id="${attr(item.id)}" role="button" tabindex="0" aria-label="${attr(itemTitle(item,"Konzept"))} öffnen"><span class="badge accent">${esc(item.category || "Konzept")}</span><h3>${esc(itemTitle(item,"Idee"))}</h3><p>${esc(itemText(item) || "Tippen, um den Gedanken auszuarbeiten.")}</p><div class="card-foot"><button class="icon-action" data-action="context-note" data-collection="concepts" data-id="${attr(item.id)}" aria-label="Notiz hinzufügen">＋✎</button><button class="icon-action" data-action="edit-entity" data-collection="concepts" data-id="${attr(item.id)}" aria-label="Konzept bearbeiten">✎</button></div></article>`;
       }).join("") || `<div class="reader-empty"><div><span style="font-size:48px">◇</span><h2>Leere Arbeitsfläche</h2><p>Erstelle deine erste Konzeptkarte.</p><button class="btn primary" data-action="new-entity" data-collection="concepts">＋ Karte</button></div></div>`}</div>
     </div>`;
   }
@@ -2200,6 +2211,28 @@
     sheet("Shortnote", `<form data-form="shortnote"><div class="shortnote-type" role="radiogroup"><label><input type="radio" name="shortType" value="note" checked data-action="shortnote-type"> Notiz</label><label><input type="radio" name="shortType" value="message" data-action="shortnote-type"> Mitteilung</label></div><div class="field full"><label>Text *</label><textarea name="content" rows="4" required autofocus placeholder="Kurz festhalten …">${esc(prefill || "")}</textarea></div><div data-shortnote-section="note">${tagEditor([], { required:true, single:true, label:"Schlagwortkategorie" })}<p class="muted small">Die Notiz landet in der Inbox und unter diesem Schlagwort.</p></div><div data-shortnote-section="message" hidden><div class="field"><label>Zustellzeitpunkt *</label><input name="deliverAt" type="datetime-local" value="${attr(localValue)}"></div><p class="muted small">Mitteilungen werden geplant und nicht als Notiz dupliziert.</p></div><div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Speichern</button></div></form>`, "shortnote-sheet");
   }
 
+  /*
+   * BEFUND (Nutzer: "ich kann die konzepte nicht mal richtig oeffnen, es
+   * wird mir nur 1/100 angezeigt"): jede Konzeptkarte auf dem Board zeigt
+   * nur eine auf drei Zeilen geklammerte Vorschau (siehe .concept-note in
+   * styles.css) — fuer die "Strategien, Artikel und politische Konzepte",
+   * die diese App laut eigener Beschreibung tragen soll, blieb praktisch
+   * alles unsichtbar. Es gab keine Stelle, die den VOLLEN Titel und Inhalt
+   * zeigte; nur "Bearbeiten" (aendern) und "＋✎ Notiz" (etwas Neues dazu
+   * schreiben) — kein blosses Lesen.
+   */
+  function openConceptDetail(id) {
+    const item = collection("concepts").find((entry) => entry.id === id);
+    if (!item) return toast("Nicht verfügbar", "Dieses Konzept wurde gelöscht.", "error");
+    const text = itemText(item);
+    sheet(itemTitle(item, "Konzept"), `<div class="detail-block"><small>${esc(item.category || "Konzept")}</small></div>
+      <div class="concept-detail-text">${text ? esc(text).replace(/\n/g, "<br>") : `<span class="muted">Noch kein Inhalt — auf „Bearbeiten" tippen, um ihn zu schreiben.</span>`}</div>
+      <div class="sheet-foot">
+        <button class="btn" type="button" data-action="context-note" data-collection="concepts" data-id="${attr(item.id)}">＋✎ Notiz</button>
+        <button class="btn primary" type="button" data-action="edit-entity" data-collection="concepts" data-id="${attr(item.id)}">✎ Bearbeiten</button>
+      </div>`, "wide");
+  }
+
   function openContextNote(collectionName, id, noteClass) {
     const item = collection(collectionName).find((entry) => entry.id === id);
     if (!item) return toast("Quelle nicht verfügbar", "Das verknüpfte Element wurde gelöscht.", "error");
@@ -2615,6 +2648,7 @@
         source:{ app:"reports", entityType:"snapshot", entityId:day, label:`Bericht ${formatDate(day)}`, route:"#/reports" } }); return;
     }
     if (action === "context-note") { openContextNote(button.dataset.collection, button.dataset.id, button.dataset.noteClass); return; }
+    if (action === "open-concept") { openConceptDetail(button.dataset.id); return; }
     if (action === "note-filter") { state.noteFilter = { mode:button.dataset.mode || "all", value:button.dataset.value || "" }; render(); return; }
     if (action === "note-source") {
       const note = collection("notes").find((item) => item.id === button.dataset.id); if (!note) return;

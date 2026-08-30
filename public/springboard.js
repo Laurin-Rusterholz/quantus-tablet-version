@@ -87,6 +87,7 @@
         { key: "pdfeditor", label: "PDF", icon: "P", tone: "red" },
         { key: "browser", label: "Browser", icon: "◎", tone: "blue" },
         { key: "briefings", label: "Briefings", icon: "B", tone: "green" },
+        { key: "briefingpdf", label: "Briefing-PDF", icon: "📬", tone: "green" },
         { key: "weekplanning", label: "Wochenplan", icon: "▤", tone: "violet" },
         { key: "googlecalendar", label: "Google Kal.", icon: "31", tone: "blue" },
         { key: "messages", label: "Nachrichten", icon: "✉", tone: "coral" },
