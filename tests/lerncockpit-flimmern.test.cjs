@@ -92,8 +92,8 @@ function stubDom() {
 const dom = stubDom();
 dom.render();
 assert.match(dom.text(), /id="quantusLearningHub"/, "das Lerncockpit wurde gar nicht eingesetzt");
-assert.equal((dom.text().match(/class="qt-learning-card/g) || []).length, 5,
-  "es muessen fuenf Karten sein: BM, Smarter, Leseplan, Career Model, Pinnboards");
+assert.equal((dom.text().match(/class="qt-learning-card/g) || []).length, 6,
+  "es muessen sechs Karten sein: BM, Briefing-PDF, Smarter, Leseplan, Career Model, Pinnboards");
 
 // ── 2. DER BEFUND: gleiche Daten duerfen nichts neu schreiben ─────────────
 const vorher = dom.schreibvorgaenge();
@@ -113,7 +113,7 @@ dom.render();
 assert.equal(dom.schreibvorgaenge(), vorher + 1, "nach der Aenderung laeuft es erneut in die Schleife");
 
 // ── 4. Die Karten fuehren in die Tablet-Routen, nicht nach draussen ───────
-for (const route of ["bm", "smarter", "leseplan", "career", "workspace"]) {
+for (const route of ["bm", "briefingpdf", "smarter", "leseplan", "career", "workspace"]) {
   assert.match(dom.text(), new RegExp(`data-action="go" data-route="${route}"`),
     `die Karte fuer ${route} oeffnet nicht die Tablet-Route`);
 }
