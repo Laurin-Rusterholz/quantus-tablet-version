@@ -580,17 +580,35 @@
     }, 160);
   });
 
-  function mount(route) {
-    // Beim Verlassen faellt das geoeffnete Board weg — sonst steht es beim
-    // naechsten Betreten der App noch offen, obwohl man die Uebersicht wollte.
-    if (route !== "sticky") { ui.offen = null; ui.gewaehlt = null; }
-  }
+  /*
+   * BEFUND (Nutzer: "unter dem app pinnboards sollen von anfang an alle
+   * pinnboard angezeigt werden ... nicht dass ich auswaehlen kann, wenn ich
+   * eines geoeffnet habe, welches ich ueberhaupt oeffnen moechte"). Die App
+   * oeffnete beim Betreten immer noch dasselbe Board, das beim letzten
+   * Besuch offen war — die Uebersicht war nur ueber "‹ Alle Boards" IM Board
+   * erreichbar, nie der Einstieg selbst.
+   *
+   * Ursache: mount(route) wird laut render() in app.js NUR fuer das Modul
+   * aufgerufen, dessen Route gerade aktiv ist — route ist hier also IMMER
+   * "sticky", nie etwas anderes. Die Abfrage "route !== 'sticky'" konnte
+   * folglich nie zutreffen; ui.offen wurde nie zurueckgesetzt, auch nicht
+   * nach dem Verlassen der App ueber Dock/Homebildschirm.
+   *
+   * hashchange feuert dagegen genau bei echter Navigation — unabhaengig
+   * davon, wie oft render()/mount() sonst neu laufen (Sync, eigene Aktionen
+   * innerhalb des offenen Boards). Verlaesst der Hash die Route, faellt das
+   * offene Board weg; beim naechsten Oeffnen der App steht wieder die
+   * Uebersicht da.
+   */
+  window.addEventListener("hashchange", function () {
+    var route = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
+    if (route !== "sticky" && ui.offen) { ui.offen = null; ui.gewaehlt = null; }
+  });
 
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({
     key: "sticky",
     routes: ["sticky"],
     render: render,
-    mount: mount,
     onAction: onAction,
     onSubmit: onSubmit
   });
