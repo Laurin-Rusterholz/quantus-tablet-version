@@ -90,6 +90,7 @@
     // stumm verdraengt.
     { key: "briefingpdf", label: "Briefing-PDF", icon: "📬", tone: "green", fullRoute: "briefingpdf", group: "Werkzeuge" },
     { key: "quantusproject", label: "Quantus Projekt", icon: "Q", tone: "blue", fullRoute: "quantusproject", group: "Werkzeuge" },
+    { key: "chatgptnotes", label: "ChatGPT", icon: "🤖", tone: "sand", fullRoute: "chatgptnotes", group: "Werkzeuge" },
     { key: "polaris", label: "Polaris", icon: "✦", tone: "green", fullRoute: "polaris", group: "Werkzeuge", allow: "microphone; clipboard-read; clipboard-write" }
   ];
 
@@ -167,6 +168,8 @@
     // und weil der App-Bildschirm seine Einordnung aus dieser Liste zieht,
     // meldete er sie faelschlich als "ohne eigene Tablet-Ansicht".
     "statistics", "reports", "sticky", "briefingpdf",
+    // ChatGPT-Modul (chatgpt-app.js): Notes und Leads lesen, ChatGPT-Aufgaben am Element.
+    "chatgptnotes",
     ...Object.keys(COLLECTION_CONFIG)
   ]);
 
@@ -1320,7 +1323,7 @@
       ? Notes.notesForSource(collection("notes"), contextSource(name, item).app, item.id).length
       : 0;
     return `<article class="entity-card ${pinned ? "pinned" : ""}">
-      <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}${isOverdue(item) ? `<span class="badge coral">Überfällig</span>` : ""}${pinned ? `<span class="badge sand">Angepinnt</span>` : ""}${contextNotes ? `<span class="badge">${contextNotes} Notiz${contextNotes === 1 ? "" : "en"}</span>` : ""}</div>
+      <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}${isOverdue(item) ? `<span class="badge coral">Überfällig</span>` : ""}${pinned ? `<span class="badge sand">Angepinnt</span>` : ""}${contextNotes ? `<span class="badge">${contextNotes} Notiz${contextNotes === 1 ? "" : "en"}</span>` : ""}${window.QuantusChatgpt ? window.QuantusChatgpt.marker(name, item.id) : ""}</div>
       <h3>${esc(itemTitle(item,config.label))}</h3><p>${esc(itemText(item) || "Keine Beschreibung")}</p>
       <div class="card-foot"><span class="muted small">${meta ? esc(formatDate(meta)) : ""}</span><span class="spacer"></span>
         ${CONTEXT_NOTE_COLLECTIONS.has(name) ? `<button class="icon-action" data-action="context-note" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Notiz hinzufügen">＋✎</button>` : ""}
@@ -1710,6 +1713,7 @@
         return collection("scheduledMessages").filter((item) => !item.isRead && String(item.deliverAt || "") <= now).length;
       }
       if (key === "time") return Object.keys(asMap(state.payload.timers)).length;
+      if (key === "chatgptnotes") return window.QuantusChatgpt ? window.QuantusChatgpt.badge() : 0;
       if (COLLECTION_CONFIG[key]) return collection(key).filter((item) => !isDone(item)).length;
     } catch (_) {}
     return 0;
@@ -2281,7 +2285,7 @@
     const noteSection = existing && CONTEXT_NOTE_COLLECTIONS.has(name)
       ? `<section class="entity-linked-notes"><div class="widget-head"><span class="widget-icon">✎</span><h3>Notizen</h3><button class="btn small-btn" type="button" data-action="context-note" data-collection="${attr(name)}" data-id="${attr(existing.id)}">＋ Notiz</button></div><div class="item-list">${linkedNotes.map((note) => `<button class="list-item" type="button" data-action="edit-note" data-id="${attr(note.id)}"><span class="badge accent">${esc(noteClassLabel(note.noteClass))}</span><span class="item-main"><strong class="item-title">${esc(itemTitle(note))}</strong><small class="item-meta">${esc(noteContent(note).slice(0, 100))}</small></span></button>`).join("") || emptyMini("Noch keine verknüpfte Notiz")}</div></section>`
       : "";
-    const body = `<form data-form="entity" data-collection="${attr(name)}" data-id="${attr(id || "")}">${draft ? `<p class="muted small" style="margin:0 0 10px">Entwurf von ${esc(relativeTime(draft.savedAt))} wiederhergestellt.</p>` : ""}<div class="form-grid"><div class="field full"><label>Titel</label><input name="title" value="${attr(existing ? itemTitle(existing,"") : draftTitle)}" required></div><div class="field full"><label>Beschreibung / Inhalt</label><textarea name="description">${esc(existing ? itemText(existing) : draftText)}</textarea></div><div class="field"><label>Status</label><select name="status"><option value="open" ${!existing||existing.status==="open"?"selected":""}>Offen</option><option value="in_progress" ${existing&&existing.status==="in_progress"?"selected":""}>In Arbeit</option><option value="done" ${existing&&isDone(existing)?"selected":""}>Erledigt</option></select></div><div class="field"><label>${name === "meetings" ? "Datum" : "Fällig am"}</label><input name="date" type="date" value="${attr(existing && String(existing.date || existing.dueDate || "").slice(0,10))}"></div>${name === "meetings" ? `<div class="field"><label>Zeit</label><input name="time" type="time" value="${attr(existing && (existing.time || ""))}"></div><div class="field"><label>Ort</label><input name="location" value="${attr(existing && existing.location)}"></div>` : ""}</div>${noteSection}<div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Mit AI Sync speichern</button></div></form>`;
+    const body = `<form data-form="entity" data-collection="${attr(name)}" data-id="${attr(id || "")}">${draft ? `<p class="muted small" style="margin:0 0 10px">Entwurf von ${esc(relativeTime(draft.savedAt))} wiederhergestellt.</p>` : ""}<div class="form-grid"><div class="field full"><label>Titel</label><input name="title" value="${attr(existing ? itemTitle(existing,"") : draftTitle)}" required></div><div class="field full"><label>Beschreibung / Inhalt</label><textarea name="description">${esc(existing ? itemText(existing) : draftText)}</textarea></div><div class="field"><label>Status</label><select name="status"><option value="open" ${!existing||existing.status==="open"?"selected":""}>Offen</option><option value="in_progress" ${existing&&existing.status==="in_progress"?"selected":""}>In Arbeit</option><option value="done" ${existing&&isDone(existing)?"selected":""}>Erledigt</option></select></div><div class="field"><label>${name === "meetings" ? "Datum" : "Fällig am"}</label><input name="date" type="date" value="${attr(existing && String(existing.date || existing.dueDate || "").slice(0,10))}"></div>${name === "meetings" ? `<div class="field"><label>Zeit</label><input name="time" type="time" value="${attr(existing && (existing.time || ""))}"></div><div class="field"><label>Ort</label><input name="location" value="${attr(existing && existing.location)}"></div>` : ""}</div>${noteSection}${existing && window.QuantusChatgpt ? window.QuantusChatgpt.taskSection(name, existing) : ""}<div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button><button class="btn primary" type="submit">Mit AI Sync speichern</button></div></form>`;
     sheet(`${existing ? "Bearbeiten" : "Neu"}: ${config.label}`, body);
   }
 
