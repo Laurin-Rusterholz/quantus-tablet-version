@@ -12,6 +12,7 @@ const springboard = fs.readFileSync(path.join(root, "springboard.js"), "utf8");
 const mailApp = fs.readFileSync(path.join(root, "mail-app.js"), "utf8");
 const flowertechApp = fs.readFileSync(path.join(root, "flowertech-app.js"), "utf8");
 const nativeModules = fs.readFileSync(path.join(root, "native-modules.js"), "utf8");
+const chatgptApp = fs.readFileSync(path.join(root, "chatgpt-app.js"), "utf8");
 
 for (const id of ["app", "main", "overlayRoot", "syncDot", "accountButton"]) {
   assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
@@ -55,7 +56,7 @@ for (const fn of ["renderRoute", "renderCalendar", "renderCollectionView", "rend
  * Tablet-Modul beansprucht sie.
  */
 const moduleRoutes = new Set();
-for (const source of [nativeModules, springboard, mailApp, flowertechApp, workspace]) {
+for (const source of [nativeModules, springboard, mailApp, flowertechApp, workspace, chatgptApp]) {
   const block = source.match(/routes:\s*\[([^\]]*)\]/);
   if (block) block[1].split(",").forEach((entry) => {
     const key = entry.trim().replace(/^["']|["']$/g, "");
