@@ -333,10 +333,16 @@
     if (!item) { a.toast("Anker fehlt", "Das Element wurde nicht gefunden.", "warn"); return Promise.resolve(false); }
     var kind = kindOf(collectionName);
     var now = new Date().toISOString();
-    return a.executeOperation(a.makeOperation("entity", "create", "chatgptTasks", a.Core.makeId("chatgptTask"), {
+    var taskId = a.Core.makeId("chatgptTask");
+    // executeOperation liefert false, sobald die Aenderung nur vorgemerkt
+    // wurde (offline, nicht angemeldet) — lokal ist sie dann trotzdem drin.
+    // Massgeblich ist deshalb der Datenstand, nicht der Rueckgabewert.
+    return a.executeOperation(a.makeOperation("entity", "create", "chatgptTasks", taskId, {
       text: text, state: "offen", anchorKind: kind, anchorId: item.id, anchorLabel: label || a.itemTitle(item, ""),
       createdBy: "laurin", resolvedAt: null, blockedReason: null, comments: [], createdAt: now
-    }), { silent: true });
+    }), { silent: true }).then(function () {
+      return col("chatgptTasks").some(function (t) { return t.id === taskId; }) ? taskId : null;
+    });
   }
   function refreshSection(node) {
     var section = node && node.closest ? node.closest("[data-cg-section]") : null;
@@ -352,8 +358,8 @@
   }
   function submitTask(input) {
     var value = input.value;
-    createTask(input.dataset.collection, input.dataset.id, value, input.dataset.label).then(function (ok) {
-      if (!ok) return;
+    createTask(input.dataset.collection, input.dataset.id, value, input.dataset.label).then(function (taskId) {
+      if (!taskId) return;
       input.value = "";
       var a = api();
       if (a) a.toast("ChatGPT-Aufgabe angelegt", String(value).slice(0, 60), "ok");
