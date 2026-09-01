@@ -1,4 +1,4 @@
-const CACHE = "quantus-tablet-v28-briefingpdf-de";
+const CACHE = "quantus-tablet-v29-gmail-vacation";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
   "/quantus-tablet-expansion.css", "/native-modules.css", "/bm-app.css", "/sticky-app.css", "/pdf-viewer.css", "/briefing-app.css",

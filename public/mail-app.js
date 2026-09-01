@@ -35,6 +35,10 @@
     loadedOnce: false
   };
 
+  // Zuletzt geladene VacationSettings (users.settings.getVacation) — nur fuer
+  // die Anzeige "aktiv" im Kopf, die Wahrheit liegt bei Gmail.
+  var vacation = null;
+
   function api() { return window.__quantusTablet || null; }
   function esc(value) {
     var a = api();
@@ -247,6 +251,8 @@
     return '<div class="view mail-view">' +
       (a ? a.viewHeader("Mail", ui.search ? "Suche: " + ui.search : folder.label + (unread ? " · " + unread + " ungelesen" : ""),
         '<button class="btn" data-action="mail-refresh">⟳ Aktualisieren</button>' +
+        '<button class="btn' + (vacation && vacation.enableAutoReply ? " primary" : "") + '" data-action="mail-vacation">🌴 Abwesenheit' +
+        (vacation && vacation.enableAutoReply ? " · aktiv" : "") + '</button>' +
         '<button class="btn primary" data-action="mail-compose">✎ Neue E-Mail</button>') : "") +
       '<div class="mail-shell">' +
         '<aside class="mail-sidebar">' +
@@ -323,6 +329,113 @@
       '</div><p class="muted small">Vor dem Versand erscheint eine Bestaetigung mit Vorschau.</p>' +
       '<div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button>' +
       '<button class="btn primary" type="submit">Senden…</button></div></form>', "wide");
+  }
+
+  // ── Abwesenheitsantwort (VacationSettings) ─────────────────────────────
+  // Nutzt denselben Gmail-Proxy wie der Rest der Mail-App: GET/PUT
+  // /users/me/settings/vacation (Scope gmail.settings.basic, schon Teil der
+  // bestehenden AI-Sync-Google-Verbindung). Das eingegebene Enddatum ist
+  // inklusive gemeint, Gmails endTime ist exklusiv — deshalb +1 Tag beim
+  // Senden und -1 Tag beim Einlesen fuers Formular. Ein PUT geschieht
+  // ausschliesslich nach einer sichtbaren Bestaetigung in onSubmitVacation.
+  function vacYmdToMs(ymd) {
+    if (!ymd) return null;
+    var parts = String(ymd).split("-");
+    if (parts.length !== 3) return null;
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0);
+    return isNaN(date.getTime()) ? null : date.getTime();
+  }
+  function vacMsToYmd(ms) {
+    if (ms == null) return "";
+    var n = Number(ms);
+    if (!isFinite(n)) return "";
+    var date = new Date(n);
+    if (isNaN(date.getTime())) return "";
+    var mm = String(date.getMonth() + 1);
+    var dd = String(date.getDate());
+    if (mm.length < 2) mm = "0" + mm;
+    if (dd.length < 2) dd = "0" + dd;
+    return date.getFullYear() + "-" + mm + "-" + dd;
+  }
+  function vacFmtDe(ymd) {
+    var parts = String(ymd || "").split("-");
+    return parts.length === 3 ? (parts[2] + "." + parts[1] + "." + parts[0]) : (ymd || "(offen)");
+  }
+
+  function vacationSheet(data) {
+    var v = data || {};
+    var startYmd = vacMsToYmd(v.startTime);
+    var endYmd = v.endTime != null ? vacMsToYmd(Number(v.endTime) - 1) : "";
+    var a = api();
+    if (!a) return;
+    a.sheet("Abwesenheit",
+      '<form data-form="mail-vacation"><div class="form-grid">' +
+      '<div class="field full"><label><input type="checkbox" name="active"' + (v.enableAutoReply ? " checked" : "") +
+      '> Automatische Abwesenheitsantwort aktiv</label></div>' +
+      '<div class="field"><label>Erster Tag</label><input name="start" type="date" value="' + esc(startYmd) + '"></div>' +
+      '<div class="field"><label>Letzter Tag (inklusive)</label><input name="end" type="date" value="' + esc(endYmd) + '"></div>' +
+      '<div class="field full"><label>Betreff</label><input name="subject" value="' + esc(v.responseSubject || "") + '"></div>' +
+      '<div class="field full"><label>Antworttext</label><textarea name="text" rows="8">' +
+      esc(v.responseBodyPlainText || v.responseBodyHtml || "") + "</textarea></div>" +
+      '<div class="field full"><label><input type="checkbox" name="contacts"' + (v.restrictToContacts ? " checked" : "") +
+      '> Nur an meine Kontakte antworten</label></div>' +
+      '<div class="field full"><label><input type="checkbox" name="domain"' + (v.restrictToDomain ? " checked" : "") +
+      '> Nur innerhalb meiner Organisation/Domain antworten</label></div>' +
+      '</div><p class="muted small">Leere Datumsfelder bedeuten unbefristet. Vor dem Aktivieren erscheint eine Bestaetigung mit Vorschau.</p>' +
+      '<div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button>' +
+      '<button class="btn primary" type="submit">Speichern…</button></div></form>', "wide");
+  }
+
+  async function openVacationSheet() {
+    try {
+      vacation = await rpc("GET", "/users/me/settings/vacation");
+    } catch (error) {
+      notify("Abwesenheit", error.message || String(error), "error");
+      vacation = vacation || {};
+    }
+    vacationSheet(vacation || {});
+  }
+
+  async function onSubmitVacation(form, data) {
+    var a = api();
+    var activeInput = form.querySelector('[name="active"]');
+    var contactsInput = form.querySelector('[name="contacts"]');
+    var domainInput = form.querySelector('[name="domain"]');
+    var active = !!(activeInput && activeInput.checked);
+    var startYmd = String(data.get("start") || "").trim();
+    var endYmd = String(data.get("end") || "").trim();
+    var subject = String(data.get("subject") || "").trim();
+    var text = String(data.get("text") || "").trim();
+    var contacts = !!(contactsInput && contactsInput.checked);
+    var domain = !!(domainInput && domainInput.checked);
+    if (active && !text) { notify("Antworttext fehlt", "Bitte einen Antworttext eingeben, bevor die Abwesenheitsantwort aktiviert wird.", "error"); return true; }
+    if (startYmd && endYmd && startYmd > endYmd) { notify("Zeitraum", "Der erste Tag muss vor oder gleich dem letzten Tag liegen.", "error"); return true; }
+    var range = (startYmd || endYmd) ? (vacFmtDe(startYmd) + " bis " + vacFmtDe(endYmd)) : "unbefristet";
+    var question = active
+      ? ("Automatische Abwesenheitsantwort wirklich aktivieren?\n\nZeitraum: " + range +
+         "\nBetreff: " + (subject || "(kein Betreff)") + "\nText: " + text.slice(0, 200))
+      : "Abwesenheitsantwort deaktivieren?";
+    if (!confirm(question)) return true;
+    var payload = {
+      enableAutoReply: active,
+      responseSubject: subject,
+      responseBodyPlainText: text,
+      restrictToContacts: contacts,
+      restrictToDomain: domain
+    };
+    if (startYmd) { var startMs = vacYmdToMs(startYmd); if (startMs != null) payload.startTime = String(startMs); }
+    if (endYmd) { var endMs = vacYmdToMs(endYmd); if (endMs != null) payload.endTime = String(endMs + 86400000); }
+    try {
+      var result = await rpc("PUT", "/users/me/settings/vacation", null, payload);
+      vacation = result || payload;
+      if (a) a.closeOverlay();
+      notify(active ? "Abwesenheit aktiv" : "Abwesenheit deaktiviert",
+        active ? "Gmail antwortet jetzt automatisch auf eingehende Mails." : "Die automatische Antwort ist deaktiviert.", "ok");
+      rerender();
+    } catch (error) {
+      notify("Abwesenheit", error.message || String(error), "error");
+    }
+    return true;
   }
 
   function encodeRaw(fields) {
@@ -418,6 +531,7 @@
     }
 
     if (action === "mail-compose") { composeSheet({}); return true; }
+    if (action === "mail-vacation") { openVacationSheet(); return true; }
 
     if (action === "mail-note") {
       var noteItem = ui.list.find(function (entry) { return entry.id === button.dataset.id; });
@@ -469,6 +583,7 @@
   }
 
   async function onSubmit(type, form, data) {
+    if (type === "mail-vacation") return onSubmitVacation(form, data);
     if (type !== "mail-compose") return false;
     var a = api();
     var to = String(data.get("to") || "").trim();

@@ -141,6 +141,26 @@ assert.match(mailApp, /gmail-api/, "mail must use the existing Quantus gmail pro
 for (const feature of ["mail-reply", "mail-forward", "mail-archive", "mail-trash", "mail-compose"]) {
   assert.match(mailApp, new RegExp(feature), `mail is missing ${feature}`);
 }
+
+/*
+ * ABWESENHEITSANTWORT (VacationSettings).
+ *
+ * Gmail verwaltet den automatischen Abwesenheits-Responder serverseitig
+ * ueber /users/me/settings/vacation (GET zum Laden, PUT zum Speichern). Die
+ * Tablet-Mail-App muss dieselbe Route wie AI Sync ansprechen, ein PUT darf
+ * ausschliesslich nach einer sichtbaren Bestaetigung erfolgen (kein PUT ohne
+ * Nutzerklick), und Deaktivieren muss denselben Weg nutzen wie Aktivieren.
+ */
+assert.match(mailApp, /"GET", "\/users\/me\/settings\/vacation"/, "mail must load the existing VacationSettings via GET");
+assert.match(mailApp, /"PUT", "\/users\/me\/settings\/vacation"/, "mail must save VacationSettings via PUT");
+assert.match(mailApp, /data-form="mail-vacation"/, "mail needs a vacation settings form");
+assert.match(mailApp, /mail-vacation/, "mail is missing the mail-vacation action");
+assert.match(mailApp, /Automatische Abwesenheitsantwort wirklich aktivieren/, "activating must show a visible confirmation");
+assert.match(mailApp, /responseBodyPlainText/, "vacation payload must carry a plain-text response body");
+assert.match(mailApp, /enableAutoReply: active/, "deactivating must reuse the same save path as activating");
+assert.doesNotMatch(mailApp, /rpc\("PUT",\s*"\/users\/me\/settings\/vacation"[\s\S]{0,400}confirm\(/,
+  "a PUT must never be issued before the confirm() dialog — confirm has to come first");
+
 assert.match(flowertechApp, /flowertech-doc/, "FlowerTech needs its document form");
 assert.match(html, /data-route="mail"/, "mail must be reachable from the dock");
 
