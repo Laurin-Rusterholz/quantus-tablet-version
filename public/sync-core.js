@@ -42,9 +42,8 @@
     tasks: "task", projects: "project", scheduledMessages: "scheduledMessage"
   };
   const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-  function tombstoneTime(payload, id) {
-    const log = isObject(payload && payload._deleteLog) ? payload._deleteLog : null;
-    if (!log) return 0;
+  function tombstoneTimeIn(log, id) {
+    if (!isObject(log)) return 0;
     let latest = 0;
     for (const bucket of Object.values(log)) {
       if (!isObject(bucket)) continue;
@@ -52,6 +51,36 @@
       if (ts > latest) latest = ts;
     }
     return latest;
+  }
+  function tombstoneTime(payload, id) {
+    return tombstoneTimeIn(isObject(payload && payload._deleteLog) ? payload._deleteLog : null, id);
+  }
+
+  /* Grabsteine auf eine LISTE mit id anwenden.
+   * ---------------------------------------------------------------------
+   * Befund (10.09.2026, gemeinsam mit AI Sync): Die Habits liegen nicht in
+   * `entities`, sondern in dailyBriefing.routines — einer Liste, die hier
+   * schlicht per id vereinigt wurde. Ein auf dem Desktop geloeschter Habit
+   * kam so beim Einspielen eines Backups zurueck.
+   *
+   * Regel wie ueberall sonst: Der Grabstein gewinnt nur, wenn er ECHT NEUER
+   * ist als der Eintrag. Fehlt der Zeitstempel des Eintrags, wird BEHALTEN —
+   * aus dem blossen Fehlen eines Zeitstempels wird keine Loeschabsicht
+   * abgeleitet. */
+  function dropTombstoned(list, log) {
+    if (!Array.isArray(list)) return list;
+    return list.filter((item) => {
+      if (!isObject(item) || item.id == null) return true;
+      // Ohne eigenen Zeitstempel gibt es kein Vergleichsmass — dann wird
+      // BEHALTEN. (currentTime() liefert fuer einen Eintrag ohne jede
+      // Zeitangabe kein 0, sondern den geparsten Wert von "0" — also das Jahr
+      // 2000. Ein blosser Groessenvergleich haette den Eintrag deshalb
+      // stillschweigend entfernt.)
+      if (!(item.updatedAt || item.modifiedAt || item.createdAt)) return true;
+      const tomb = tombstoneTimeIn(log, item.id);
+      const eigen = currentTime(item);
+      return !(tomb > 0 && eigen > 0 && tomb > eigen);
+    });
   }
   function writeTombstone(payload, collection, id, at) {
     if (!isObject(payload._deleteLog)) payload._deleteLog = {};
@@ -284,16 +313,37 @@
     return { applied:true, reason:"entity-batch-updated" };
   }
 
+  /* Habits (dailyBriefing.routines) folgen jetzt derselben Grabstein-Regel
+   * wie die Entitaeten (Befund 10.09.2026).
+   *
+   * Vorher fehlte sie hier ganz — mit zwei Folgen:
+   *   · Ein Abhaken auf dem Tablet legte einen auf dem Desktop geloeschten
+   *     Habit WIEDER AN: die Liste kennt die id nicht mehr, also wurde sie
+   *     angehaengt (unten `else list.push(item)`). Das geschah in der
+   *     Server-Transaktion — die Wiederauferstehung galt sofort fuer alle
+   *     Geraete.
+   *   · Ein Loeschen schnitt den Eintrag nur heraus, ohne Grabstein. Der
+   *     Desktop las die fehlende id als „auf der Gegenseite neu" und holte
+   *     den Habit zurueck.
+   * Habit-Inhalte werden dabei weder angelegt noch veraendert; es geht
+   * ausschliesslich um die Frage, ob eine Operation gilt. */
   function applyHabitOperation(payload, operation) {
     if (!operation.id) return { applied: false, reason: "invalid-habit-operation" };
     const list = payload.dailyBriefing.routines;
     const index = list.findIndex((item) => item && item.id === operation.id);
     const existing = index >= 0 ? list[index] : null;
-    if (existing && currentTime(existing) > operationTime(operation)) {
+    const opTime = operationTime(operation);
+    const tombTs = tombstoneTime(payload, operation.id);
+    if (operation.action !== "delete" && tombTs > opTime) {
+      return { applied: false, reason: "tombstoned" };
+    }
+    if (existing && currentTime(existing) > opTime) {
       return { applied: false, reason: "newer-remote-version" };
     }
     if (operation.action === "delete") {
       if (index >= 0) list.splice(index, 1);
+      // Der Grabstein IST die Loeschung — ohne ihn bleibt sie lokal.
+      writeTombstone(payload, "routine", operation.id, opTime || Date.now());
       return { applied: true, reason: "habit-deleted" };
     }
     const item = {
@@ -304,6 +354,9 @@
     };
     if (index >= 0) list[index] = item;
     else list.push(item);
+    // Eine nachweislich juengere Aenderung hebt den Grabstein auf (dieselbe
+    // Umkehrung wie bei den Entitaeten: Undo/Wiederaufnahme).
+    if (tombTs) clearTombstone(payload, operation.id);
     return { applied: true, reason: "habit-updated" };
   }
 
@@ -708,6 +761,23 @@
     ["documents", "selfLetters", "topics"].forEach((key) => {
       merged.journal[key] = mergeById(a.journal && a.journal[key], b.journal && b.journal[key]);
     });
+    /* Zum Schluss die Grabsteine anwenden — sonst holt das Einspielen eines
+       Backups zurueck, was anderswo bewusst geloescht wurde. Betrifft die
+       Habits (dailyBriefing.routines) und jede weitere Liste mit id. */
+    const grabsteine = isObject(merged._deleteLog) ? merged._deleteLog : null;
+    if (grabsteine) {
+      merged.dailyBriefing.routines = dropTombstoned(merged.dailyBriefing.routines, grabsteine);
+      Object.keys(merged).forEach((key) => {
+        if (key === "entities" || key === "_deleteLog") return;
+        if (Array.isArray(merged[key])) merged[key] = dropTombstoned(merged[key], grabsteine);
+      });
+      LIST_AREAS.forEach((area) => {
+        const parts = area.split(".");
+        if (parts.length === 2 && isObject(merged[parts[0]]) && Array.isArray(merged[parts[0]][parts[1]])) {
+          merged[parts[0]][parts[1]] = dropTombstoned(merged[parts[0]][parts[1]], grabsteine);
+        }
+      });
+    }
     return merged;
   }
 
@@ -746,6 +816,7 @@
     normalisePayload,
     parseWrapper,
     applyOperation,
+    dropTombstoned,
     buildWrapper,
     makeId,
     isValidOperation,
