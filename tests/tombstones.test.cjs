@@ -88,4 +88,89 @@ const op = (action, id, patch, updatedAt, extra = {}) => ({
   eq(r.payload._deleteLog.idea.i, t("2026-08-30T10:00:00Z"), "Idea-Grabstein aus dem Batch");
 }
 
+// ── 8) Habits: dieselbe Regel wie fuer Entitaeten ───────────────────────
+//
+// Befund (10.09.2026): Habits liegen nicht in `entities`, sondern in
+// dailyBriefing.routines. applyHabitOperation kannte die Grabsteine nicht —
+// ein Abhaken auf dem Tablet legte einen auf dem Desktop geloeschten Habit in
+// der Server-Transaktion WIEDER AN, und ein Loeschen hier hinterliess keinen
+// Grabstein. Es werden dabei keine Habit-Inhalte erzeugt oder veraendert;
+// geprueft wird nur, welche Operation gilt.
+const habitOp = (action, id, patch, updatedAt) => ({
+  kind: "habit", action, id, patch, updatedAt, operationId: "hop-" + id + "-" + updatedAt,
+});
+const habitStand = (routines, log) => ({
+  entities: {}, dailyBriefing: { routines }, meta: {},
+  ...(log ? { _deleteLog: log } : {}),
+});
+
+// 8a) Abhaken nach der Loeschung legt den Habit nicht neu an
+{
+  const payload = habitStand([], { routine: { rt_1: t("2026-09-10T10:00:00Z") } });
+  const r = Sync.applyOperation(payload, habitOp("update", "rt_1", { completions: [{ date: "2026-09-10", value: 1 }] }, "2026-09-10T09:30:00Z"));
+  eq(r.applied, false, "das Abhaken einer geloeschten Routine muss abgewiesen werden");
+  eq(r.reason, "tombstoned");
+  eq(r.payload.dailyBriefing.routines.length, 0, "die geloeschte Routine darf nicht neu entstehen");
+}
+
+// 8b) Loeschen auf dem Tablet hinterlaesst einen Grabstein im gemeinsamen Format
+{
+  const payload = habitStand([{ id: "rt_2", text: "Routine", createdAt: "2026-01-05T08:00:00Z" }]);
+  const r = Sync.applyOperation(payload, habitOp("delete", "rt_2", {}, "2026-09-10T10:00:00Z"));
+  eq(r.applied, true, "das Loeschen einer Routine wird abgewiesen");
+  eq(r.payload.dailyBriefing.routines.length, 0, "die Routine steht weiterhin in der Liste");
+  eq(r.payload._deleteLog.routine.rt_2, t("2026-09-10T10:00:00Z"),
+    "ohne Grabstein bleibt die Loeschung auf diesem Geraet — der Desktop holt sie zurueck");
+}
+
+// 8c) Eine NACH der Loeschung bewusst bearbeitete Routine gewinnt
+{
+  const payload = habitStand([], { routine: { rt_3: t("2026-09-10T10:00:00Z") } });
+  const r = Sync.applyOperation(payload, habitOp("update", "rt_3", { text: "Wieder aufgenommen" }, "2026-09-10T11:00:00Z"));
+  eq(r.applied, true, "eine spaetere bewusste Aenderung muss gelten");
+  eq(r.payload.dailyBriefing.routines.length, 1, "die wieder aufgenommene Routine fehlt");
+  ok(!r.payload._deleteLog || !r.payload._deleteLog.routine || !r.payload._deleteLog.routine.rt_3,
+    "der ueberholte Grabstein bleibt liegen");
+}
+
+// ── 9) Backup einspielen holt nichts Geloeschtes zurueck ────────────────
+{
+  const lokal = habitStand([{ id: "rt_bleibt", text: "Bleibt", createdAt: "2026-01-05T08:00:00Z" }],
+    { routine: { rt_weg: t("2026-09-10T10:00:00Z") } });
+  const backup = habitStand([
+    { id: "rt_weg", text: "Vor der Loeschung gesichert", createdAt: "2026-01-05T08:00:00Z" },
+    { id: "rt_bleibt", text: "Bleibt", createdAt: "2026-01-05T08:00:00Z" },
+  ]);
+  const m = Sync.mergePayloads(lokal, backup);
+  eq(m.dailyBriefing.routines.map((r) => r.id).sort().join(","), "rt_bleibt",
+    "das Einspielen eines Backups holt die geloeschte Routine zurueck");
+}
+
+// ── 10) Aus blossem Fehlen wird KEINE Loeschabsicht ─────────────────────
+//
+// Der wichtigste Schutz in die andere Richtung: Ein Habit, den nur eine Seite
+// kennt, ist nicht geloescht — er ist nur dort noch nicht angekommen. Ohne
+// Grabstein bleibt er, in beide Richtungen. Das gilt auch fuer alles, was VOR
+// der Grabstein-Einfuehrung geloescht wurde: Diese Loeschungen sind nirgends
+// vermerkt, also bleibt der Habit stehen, bis ihn jemand bewusst erneut
+// loescht. Nichts verschwindet auf Verdacht.
+{
+  const nurLokal = habitStand([{ id: "rt_a", text: "Nur hier", createdAt: "2026-01-05T08:00:00Z" }]);
+  const nurBackup = habitStand([{ id: "rt_b", text: "Nur dort", createdAt: "2026-01-05T08:00:00Z" }]);
+  const m1 = Sync.mergePayloads(nurLokal, nurBackup);
+  eq(m1.dailyBriefing.routines.map((r) => r.id).sort().join(","), "rt_a,rt_b",
+    "ein nur einseitig bekannter Habit wird als geloescht behandelt");
+  const m2 = Sync.mergePayloads(nurBackup, nurLokal);
+  eq(m2.dailyBriefing.routines.map((r) => r.id).sort().join(","), "rt_a,rt_b",
+    "die Richtung des Zusammenfuehrens veraendert das Ergebnis");
+
+  // Und ein Eintrag OHNE Zeitstempel bleibt ebenfalls stehen: ohne
+  // Vergleichsmass wird nicht geloescht.
+  const ohneZeit = habitStand([{ id: "rt_c", text: "Ohne Zeitstempel" }],
+    { routine: { rt_c: t("2026-09-10T10:00:00Z") } });
+  const m3 = Sync.mergePayloads(ohneZeit, habitStand([{ id: "rt_c", text: "Ohne Zeitstempel" }]));
+  eq(m3.dailyBriefing.routines.length, 1,
+    "ein Eintrag ohne Zeitstempel wird auf Verdacht entfernt");
+}
+
 console.log(`tombstones: ok (${checks} Pruefungen)`);
