@@ -41,6 +41,14 @@ const PRUEFUNGEN = {
   "ein ungeklaerter Versand wird gezeigt": (s) => s.includes('"unklar"') && s.includes("Ungeklaert"),
   "geklaert wird nur ausdruecklich": (s) =>
     s.includes('"geklaert-gesendet"') && s.includes('"geklaert-nicht-gesendet"') && s.includes("confirm("),
+  /* Der Ausgang ist fail-closed. Ohne Zugangsschluessel gibt der Server nichts
+     heraus — das Geraet muss ihn mitschicken und das Fehlen erklaeren. */
+  "der Zugangsschluessel wird mitgeschickt": (s) =>
+    s.includes("authHeaders") && !/token\s*=\s*["'][A-Za-z0-9]/.test(s),
+  "ein fehlender Zugangsschluessel wird erklaert": (s) =>
+    s.includes("Ausgang gesperrt") && s.includes("Einstellungen"),
+  "wiederholtes Planen legt keinen zweiten Eintrag an": (s) =>
+    s.includes("anfrageSchluessel"),
 };
 
 const jetzt = fs.readFileSync(path.join(wurzel, "public/mail-app.js"), "utf8");

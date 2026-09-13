@@ -34,7 +34,8 @@
     bodyLoading: false,
     error: "",
     loadedOnce: false,
-    ausgang: []
+    ausgang: [],
+    sendeSchluessel: null   // stabiler Schluessel des laufenden Sendeversuchs
   };
 
   // Zuletzt geladene VacationSettings (users.settings.getVacation) — nur fuer
@@ -92,14 +93,28 @@
     var a = api();
     var base = a ? a.appBaseUrl() : "";
     var body = Object.assign({ aktion: aktion }, daten || {});
+    /* Der Ausgang ist fail-closed: ohne Zugangsschluessel gibt der Server
+       nichts heraus und plant nichts ein. Dieses Geraet schickt denselben
+       Schluessel mit, den Quantus am Rechner fuehrt — aus den lokalen
+       Einstellungen, nie aus dem Quelltext und nie in der Adresse. */
+    var kopf = Object.assign({ "Content-Type": "application/json" },
+      (a && typeof a.authHeaders === "function") ? a.authHeaders() : {});
     var response = await fetch(base + "/.netlify/functions/mail-queue", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: kopf,
       body: JSON.stringify(body)
     });
     var data = await response.json().catch(function () { return {}; });
     if (!response.ok || data.ok === false) throw new Error(data.grund || data.error || ("HTTP " + response.status));
     return data;
+  }
+
+  /* Stabiler Schluessel je Sendeversuch: Geht die Antwort verloren und jemand
+     tippt noch einmal, landet der zweite Versuch auf derselben Stelle im
+     Ausgang statt als zweiter Eintrag — und damit spaeter als zweite Mail. */
+  function anfrageSchluessel() {
+    try { if (window.crypto && crypto.randomUUID) return "a" + crypto.randomUUID().replace(/-/g, ""); } catch (error) { /* aeltere Browser */ }
+    return "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
   }
 
   function zuercherZeit(ms) {
@@ -303,8 +318,13 @@
     var a = api();
     if (ui.loading && !ui.ausgang.length) return '<p class="muted" style="padding:18px">Ausgang wird geladen…</p>';
     if (ui.error && !ui.ausgang.length) {
+      var gesperrt = /GESPERRT|KEIN_ZUGANG|Zugangsschl/i.test(ui.error);
       return '<div class="mail-error">' +
-        (a ? a.emptyState("⚠", "Ausgang nicht erreichbar", "Der geplante Versand liegt auf dem Server. (" + ui.error + ")") : "") +
+        (a ? a.emptyState(gesperrt ? "🔒" : "⚠",
+          gesperrt ? "Ausgang gesperrt" : "Ausgang nicht erreichbar",
+          gesperrt
+            ? "Der Server gibt den Ausgang nur mit Zugangsschluessel heraus. Trag ihn in den Einstellungen unter „Zugangsschluessel\" ein — denselben wie in Quantus am Rechner. (" + ui.error + ")"
+            : "Der geplante Versand liegt auf dem Server. (" + ui.error + ")") : "") +
         '<div class="row-actions" style="justify-content:center"><button class="btn primary" data-action="mail-refresh">Erneut versuchen</button></div></div>';
     }
     if (!ui.ausgang.length) {
@@ -718,11 +738,14 @@
     if (!confirm("E-Mail an " + to + " in drei Stunden senden?\n\nBetreff: " + (subject || "(kein Betreff)") +
       "\n\nSie steht bis dahin im Ausgang und laesst sich abbrechen oder sofort senden.")) return true;
     try {
+      if (!ui.sendeSchluessel) ui.sendeSchluessel = anfrageSchluessel();
       var geplant = await queueRpc("plane", {
+        anfrageSchluessel: ui.sendeSchluessel,
         raw: encodeRaw({ to: to, cc: cc, subject: subject, text: text }),
         to: to, cc: cc, subject: subject, koerper: text,
         vorschau: String(text).slice(0, 300), hatAnhaenge: false, quelle: "tablet"
       });
+      ui.sendeSchluessel = null;
       if (a) a.closeOverlay();
       notify("Geplant", "Geht " + zuercherZeit((geplant.eintrag || {}).sendAt) + " raus (" + VERSANDZONE + ").", "ok");
       if (ui.folder === "outbox") refresh(false);
