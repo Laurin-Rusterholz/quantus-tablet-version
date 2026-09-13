@@ -43,12 +43,20 @@ const PRUEFUNGEN = {
     s.includes('"geklaert-gesendet"') && s.includes('"geklaert-nicht-gesendet"') && s.includes("confirm("),
   /* Der Ausgang ist fail-closed. Ohne Zugangsschluessel gibt der Server nichts
      heraus — das Geraet muss ihn mitschicken und das Fehlen erklaeren. */
-  "der Zugangsschluessel wird mitgeschickt": (s) =>
-    s.includes("authHeaders") && !/token\s*=\s*["'][A-Za-z0-9]/.test(s),
-  "ein fehlender Zugangsschluessel wird erklaert": (s) =>
-    s.includes("Ausgang gesperrt") && s.includes("Einstellungen"),
+  /* Der Ausgang hat einen EIGENEN Schluessel: der gemeinsame SYNC_AUTH_TOKEN
+     wuerde auch den Gmail-Proxy und den Kalender verlangen, an die diese App
+     keine Kopfzeile schickt. */
+  "der Ausgangs-Schluessel wird mitgeschickt": (s) =>
+    s.includes("queueAuthHeaders") && !/token\s*[:=]\s*["'][A-Za-z0-9]{6,}/.test(s),
+  "der Gmail-Proxy bleibt unangetastet": (s) =>
+    !/function rpc\([\s\S]{0,400}?queueAuthHeaders/.test(s),
+  "ein fehlender Ausgangs-Schluessel wird erklaert": (s) =>
+    s.includes("Ausgang gesperrt") && s.includes("Einstellungen") && s.includes("MAIL_QUEUE_AUTH_TOKEN"),
   "wiederholtes Planen legt keinen zweiten Eintrag an": (s) =>
     s.includes("anfrageSchluessel"),
+  /* Der Schluessel gehoert zum Formular, nicht zum Modul. */
+  "der Schluessel wird beim Oeffnen des Formulars neu vergeben": (s) =>
+    /function composeSheet\(options\)\s*\{[\s\S]{0,200}?ui\.sendeSchluessel = anfrageSchluessel\(\)/.test(s),
 };
 
 const jetzt = fs.readFileSync(path.join(wurzel, "public/mail-app.js"), "utf8");

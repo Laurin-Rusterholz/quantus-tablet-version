@@ -98,7 +98,7 @@
        Schluessel mit, den Quantus am Rechner fuehrt — aus den lokalen
        Einstellungen, nie aus dem Quelltext und nie in der Adresse. */
     var kopf = Object.assign({ "Content-Type": "application/json" },
-      (a && typeof a.authHeaders === "function") ? a.authHeaders() : {});
+      (a && typeof a.queueAuthHeaders === "function") ? a.queueAuthHeaders() : {});
     var response = await fetch(base + "/.netlify/functions/mail-queue", {
       method: "POST",
       headers: kopf,
@@ -109,9 +109,15 @@
     return data;
   }
 
-  /* Stabiler Schluessel je Sendeversuch: Geht die Antwort verloren und jemand
-     tippt noch einmal, landet der zweite Versuch auf derselben Stelle im
-     Ausgang statt als zweiter Eintrag — und damit spaeter als zweite Mail. */
+  /* Stabiler Schluessel je VERFASSEN-VORGANG: Geht die Antwort verloren und
+     jemand tippt noch einmal, landet der zweite Versuch auf derselben Stelle
+     im Ausgang statt als zweiter Eintrag — und damit spaeter als zweite Mail.
+
+     Befund der Integrationspruefung (13.09.2026): Der Schluessel darf NICHT
+     ueber Dialoge hinweg leben. Bliebe er nach einem gescheiterten Versuch
+     stehen, naehme die naechste, ganz andere Mail denselben Schluessel — der
+     Server antwortete mit dem alten Eintrag und meldete Erfolg, waehrend die
+     neue Mail nie hinausginge. Vergeben wird er beim Oeffnen des Formulars. */
   function anfrageSchluessel() {
     try { if (window.crypto && crypto.randomUUID) return "a" + crypto.randomUUID().replace(/-/g, ""); } catch (error) { /* aeltere Browser */ }
     return "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
@@ -323,7 +329,7 @@
         (a ? a.emptyState(gesperrt ? "🔒" : "⚠",
           gesperrt ? "Ausgang gesperrt" : "Ausgang nicht erreichbar",
           gesperrt
-            ? "Der Server gibt den Ausgang nur mit Zugangsschluessel heraus. Trag ihn in den Einstellungen unter „Zugangsschluessel\" ein — denselben wie in Quantus am Rechner. (" + ui.error + ")"
+            ? "Der Server gibt den Ausgang nur mit Ausgangs-Schluessel heraus. Trag ihn in den Einstellungen unter „Ausgangs-Schluessel\" ein — denselben Wert wie MAIL_QUEUE_AUTH_TOKEN auf dem Server. (" + ui.error + ")"
             : "Der geplante Versand liegt auf dem Server. (" + ui.error + ")") : "") +
         '<div class="row-actions" style="justify-content:center"><button class="btn primary" data-action="mail-refresh">Erneut versuchen</button></div></div>';
     }
@@ -437,6 +443,7 @@
   function composeSheet(options) {
     var a = api();
     if (!a) return;
+    ui.sendeSchluessel = anfrageSchluessel();   // neues Formular, neuer Schluessel
     var data = options || {};
     a.sheet(data.title || "Neue E-Mail",
       '<form data-form="mail-compose"><div class="form-grid">' +
@@ -738,7 +745,7 @@
     if (!confirm("E-Mail an " + to + " in drei Stunden senden?\n\nBetreff: " + (subject || "(kein Betreff)") +
       "\n\nSie steht bis dahin im Ausgang und laesst sich abbrechen oder sofort senden.")) return true;
     try {
-      if (!ui.sendeSchluessel) ui.sendeSchluessel = anfrageSchluessel();
+      if (!ui.sendeSchluessel) ui.sendeSchluessel = anfrageSchluessel();   // Notnagel
       var geplant = await queueRpc("plane", {
         anfrageSchluessel: ui.sendeSchluessel,
         raw: encodeRaw({ to: to, cc: cc, subject: subject, text: text }),
