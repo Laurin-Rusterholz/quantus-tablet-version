@@ -36,6 +36,11 @@ const PRUEFUNGEN = {
   "der Knopf sagt, dass er plant": (s) => s.includes("Senden (in 3 h)"),
   "Gmails Geplant-Ansicht wird nicht vorgetaeuscht": (s) => !s.includes("SCHEDULED"),
   "kein Geraetetimer verschickt nebenher": (s) => !/setInterval\([^)]*send/i.test(s),
+  /* Ein Versand, dessen Ausgang ungeklaert ist, wird NIE automatisch
+     wiederholt — er wird gezeigt und nur von einem Menschen geklaert. */
+  "ein ungeklaerter Versand wird gezeigt": (s) => s.includes('"unklar"') && s.includes("Ungeklaert"),
+  "geklaert wird nur ausdruecklich": (s) =>
+    s.includes('"geklaert-gesendet"') && s.includes('"geklaert-nicht-gesendet"') && s.includes("confirm("),
 };
 
 const jetzt = fs.readFileSync(path.join(wurzel, "public/mail-app.js"), "utf8");

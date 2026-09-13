@@ -268,6 +268,20 @@
 
   function ausgangRowHtml(entry) {
     var laeuft = entry.status === "sendet";
+    /* Ungeklaert: der Versand war angestossen, der Ausgang ist offen. Hier
+       wird nichts wiederholt und nichts behauptet — hier wird gefragt. */
+    if (entry.status === "unklar") {
+      return '<div class="mail-row"><div class="mail-row-main">' +
+        '<div class="mail-row-top"><span class="mail-from">An: ' + esc(entry.to || "") +
+          '</span><span class="mail-when">❓ Ungeklaert</span></div>' +
+        '<div class="mail-subject">' + esc(entry.subject || "(kein Betreff)") + "</div>" +
+        '<div class="mail-snippet">' + esc(entry.letzterFehler || "Der Versand wurde angestossen, der Ausgang ist ungeklaert.") +
+          " Bitte in Gmail unter Gesendet nachsehen.</div>" +
+        '<div class="row-actions">' +
+          '<button class="btn primary" data-action="mail-outbox-sent" data-id="' + esc(entry.id) + '">Ist gesendet</button>' +
+          '<button class="btn" data-action="mail-outbox-unsent" data-id="' + esc(entry.id) + '">Nicht gesendet</button>' +
+        "</div></div></div>";
+    }
     var kopf = laeuft ? "Wird gerade gesendet"
       : entry.status === "fehlgeschlagen" ? "Nicht gesendet — " + esc(entry.letzterFehler || "Grund unbekannt")
       : "Geht " + esc(zuercherZeit(entry.sendAt)) + " raus (" + VERSANDZONE + ")";
@@ -348,7 +362,8 @@
       try {
         var antwort = await queueRpc("liste", {});
         ui.ausgang = (antwort.eintraege || []).filter(function (entry) {
-          return entry && (entry.status === "geplant" || entry.status === "sendet" || entry.status === "fehlgeschlagen");
+          return entry && (entry.status === "geplant" || entry.status === "sendet"
+            || entry.status === "fehlgeschlagen" || entry.status === "unklar");
         });
         ui.error = "";
       } catch (error) { ui.error = error.message || String(error); }
@@ -614,6 +629,21 @@
     }
 
     if (action === "mail-compose") { composeSheet({}); return true; }
+
+    if (action === "mail-outbox-sent" || action === "mail-outbox-unsent") {
+      var kid = button.dataset.id;
+      var gesendet = action === "mail-outbox-sent";
+      var frage = gesendet
+        ? "Hast du in Gmail gesehen, dass diese Mail wirklich gesendet wurde?\n\nSie wird dann als gesendet vermerkt; es wird nichts verschickt."
+        : "Hast du in Gmail gesehen, dass diese Mail NICHT gesendet wurde?\n\nSie wird dann neu eingeplant.";
+      if (!confirm(frage)) return true;
+      queueRpc(gesendet ? "geklaert-gesendet" : "geklaert-nicht-gesendet", { id: kid }).then(function () {
+        notify("Geklaert", gesendet ? "Als gesendet vermerkt." : "Neu eingeplant.", "ok");
+      }).catch(function (error) {
+        notify("Nicht geklaert", error.message || String(error), "error");
+      }).then(function () { refresh(false); });
+      return true;
+    }
 
     if (action === "mail-outbox-now" || action === "mail-outbox-cancel") {
       var id = button.dataset.id;
