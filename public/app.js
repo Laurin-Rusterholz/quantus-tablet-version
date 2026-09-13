@@ -1989,7 +1989,7 @@
   function renderSettings() {
     return `<div class="view">${viewHeader("Einstellungen", "Verbindung, Darstellung und Installation der Tablet-App.", "")}
       <div class="dashboard-grid"><section class="widget span-6"><div class="widget-head"><span class="widget-icon">↔</span><h2>Synchronisation</h2></div><div class="sync-details"><div class="detail-block"><small>Status</small><strong>${esc(state.syncMessage)}</strong></div><div class="detail-block"><small>Konto</small><strong>${esc(state.user ? (state.user.email || state.user.displayName) : "Nicht angemeldet")}</strong></div><div class="detail-block"><small>Letzter Abgleich</small><strong>${esc(relativeTime(state.lastSync))}</strong></div><div class="detail-block"><small>Offline-Warteschlange</small><strong>${state.pending.length} Änderung(en)</strong></div></div><div class="row-actions" style="margin-top:14px">${state.user ? `<button class="btn" data-action="flush-sync">Jetzt synchronisieren</button><button class="btn danger" data-action="sign-out">Abmelden</button>` : `<button class="btn primary" data-action="sign-in">Mit Google anmelden</button>`}</div></section>
-      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>Beim Start zeigen</label><select name="startRoute"><option value="home" ${(state.settings.startRoute||"home")==="home"?"selected":""}>Homebildschirm</option><option value="dailybriefing" ${state.settings.startRoute==="dailybriefing"?"selected":""}>Morgenbriefing</option><option value="daily" ${state.settings.startRoute==="daily"?"selected":""}>Heute</option></select></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
+      <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⚙</span><h2>AI-Sync-Verknüpfung</h2></div><form data-form="settings"><div class="field"><label>Adresse der AI-Sync-Hauptapp</label><input name="aiSyncUrl" type="url" value="${attr(state.settings.aiSyncUrl || DEFAULT_AI_SYNC_URL)}" required></div><div class="field"><label>Ausgangs-Schlüssel (geplanter Mailversand, MAIL_QUEUE_AUTH_TOKEN)</label><input name="mailQueueToken" type="password" autocomplete="off" placeholder="${state.settings.mailQueueToken ? "hinterlegt — zum Ändern neu eintragen" : "fehlt — Ausgang gesperrt"}"></div><div class="field"><label>Beim Start zeigen</label><select name="startRoute"><option value="home" ${(state.settings.startRoute||"home")==="home"?"selected":""}>Homebildschirm</option><option value="dailybriefing" ${state.settings.startRoute==="dailybriefing"?"selected":""}>Morgenbriefing</option><option value="daily" ${state.settings.startRoute==="daily"?"selected":""}>Heute</option></select></div><div class="field"><label>Darstellung</label><select name="theme"><option value="dark" ${state.settings.theme==="dark"?"selected":""}>Dunkel – Schiefer</option><option value="light" ${state.settings.theme==="light"?"selected":""}>Hell – Leinen</option><option value="auto" ${state.settings.theme==="auto"?"selected":""}>Automatisch</option></select></div><button class="btn primary" type="submit">Speichern</button></form></section>
       <section class="widget span-6"><div class="widget-head"><span class="widget-icon">▰</span><h2>Speicher und Backup</h2></div>${storageDetails()}<div class="row-actions" style="margin-top:14px"><button class="btn primary" data-action="export-backup">Backup herunterladen</button><button class="btn" data-action="import-backup">Backup einspielen</button><button class="btn" data-action="clear-cache">Lokalen Cache leeren</button></div><input type="file" id="backupFileInput" accept="application/json,.json" style="display:none"></section>
       <section class="widget span-6"><div class="widget-head"><span class="widget-icon">⌨</span><h2>Tastatur-Abkürzungen</h2></div><div class="item-list">${[["Ctrl/Cmd + K","Alles durchsuchen"],["Ctrl/Cmd + P","Polaris öffnen"],["Alt + N","Neuer Eintrag in der aktuellen Ansicht"],["Ctrl/Cmd + S","Snapshot sichern und synchronisieren"],["Alt + 1 bis 9","Zwischen den Hauptansichten wechseln"],["Esc","Dialog schliessen"]].map(([keys,label]) => `<div class="list-item"><span class="badge">${esc(keys)}</span><div class="item-main"><div class="item-title">${esc(label)}</div></div></div>`).join("")}</div></section>
       <section class="widget span-12"><div class="widget-head"><span class="widget-icon">＋</span><h2>Als App installieren</h2></div><p class="muted">Öffne im Browser das Teilen-Menü und wähle „Zum Home-Bildschirm“. Danach startet Quantus Tablet ohne Browserleiste wie eine normale App.</p></section></div></div>`;
@@ -2564,6 +2564,16 @@
       await executeOperation(makeOperation("flashcard",existingId?"update":"create",null,id,patch));
     } else if (type === "settings") {
       state.settings.aiSyncUrl = String(data.get("aiSyncUrl")||DEFAULT_AI_SYNC_URL).replace(/\/+$/,"");
+      /* Der Schluessel NUR fuer den Ausgang (Server: MAIL_QUEUE_AUTH_TOKEN).
+         Ausdruecklich nicht der gemeinsame SYNC_AUTH_TOKEN: den zu setzen
+         wuerde auch die uebrigen Endpunkte verlangen, an die diese App keine
+         Kopfzeile schickt. Der Wert liegt NUR hier im Geraet, steht in keiner
+         Adresse und in keinem Quelltext. Ein leeres Feld laesst den bisherigen
+         Wert stehen — nur „-" loescht ihn, damit ein versehentlich leeres
+         Formular nicht stillschweigend den Zugang entfernt. */
+      const tokenFeld = String(data.get("mailQueueToken") || "").trim();
+      if (tokenFeld === "-") state.settings.mailQueueToken = "";
+      else if (tokenFeld) state.settings.mailQueueToken = tokenFeld;
       state.settings.theme = String(data.get("theme")||"dark");
       state.settings.startRoute = String(data.get("startRoute")||"home");
       saveJson(LOCAL_KEYS.settings,state.settings);
@@ -3059,6 +3069,14 @@
     getDatabase: () => db,
     // Bausteine fuer die Tablet-Module (Homebildschirm, Mail, FlowerTech)
     render, scheduleRender, sheet, closeOverlay, appBaseUrl, viewHeader, emptyState, emptyMini,
+    /* Kopfzeilen NUR fuer den fail-closed gesicherten Ausgang der Hauptapp.
+       Ohne hinterlegten Schluessel bleibt es leer — dann antwortet der Server
+       „gesperrt", und das ist die Absicht. Die uebrigen Aufrufe dieser App
+       (Gmail-Proxy, Kalender) bleiben davon unberuehrt. */
+    queueAuthHeaders: () => {
+      const t = String((state.settings && state.settings.mailQueueToken) || "").trim();
+      return t ? { Authorization: /^bearer\s/i.test(t) ? t : "Bearer " + t } : {};
+    },
     // Die nativen Modulansichten (native-modules.js) bauen auf denselben
     // Bausteinen auf wie app.js — der Anmeldehinweis und das Oeffnen einer
     // externen Adresse gehoeren dazu.

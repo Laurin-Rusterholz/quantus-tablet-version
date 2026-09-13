@@ -15,6 +15,7 @@
     { key: "inbox", label: "Posteingang", icon: "▼", q: "in:inbox" },
     { key: "unread", label: "Ungelesen", icon: "●", q: "is:unread in:inbox" },
     { key: "starred", label: "Markiert", icon: "★", q: "is:starred" },
+    { key: "outbox", label: "Ausgang (geplant)", icon: "🕒", warteschlange: true },
     { key: "sent", label: "Gesendet", icon: "▲", q: "in:sent" },
     { key: "archive", label: "Archiv", icon: "▣", q: "-in:inbox -in:trash -in:sent" },
     { key: "trash", label: "Papierkorb", icon: "⌫", q: "in:trash" }
@@ -32,7 +33,9 @@
     loading: false,
     bodyLoading: false,
     error: "",
-    loadedOnce: false
+    loadedOnce: false,
+    ausgang: [],
+    sendeSchluessel: null   // stabiler Schluessel des laufenden Sendeversuchs
   };
 
   // Zuletzt geladene VacationSettings (users.settings.getVacation) — nur fuer
@@ -75,6 +78,58 @@
     var data = await response.json().catch(function () { return {}; });
     if (!response.ok) throw new Error(data.error || data.message || ("HTTP " + response.status));
     return data;
+  }
+
+  /* ── Geplanter Versand (13.09.2026) ────────────────────────────────────
+     Ausgehende Mails gehen standardmaessig erst in DREI STUNDEN raus und
+     liegen bis dahin sichtbar im Ausgang: aenderbar am Rechner, hier
+     abbrechbar oder sofort sendbar. Geplant und gesendet wird serverseitig
+     (/.netlify/functions/mail-queue) — ein Tablet, das im Standby liegt,
+     haelt nichts auf. Die Gmail-API kennt keine Versandplanung; Gmails
+     Ansicht „Geplant" wird deshalb nicht vorgetaeuscht. */
+  var VERSANDZONE = "Europe/Zurich";
+
+  async function queueRpc(aktion, daten) {
+    var a = api();
+    var base = a ? a.appBaseUrl() : "";
+    var body = Object.assign({ aktion: aktion }, daten || {});
+    /* Der Ausgang ist fail-closed: ohne Zugangsschluessel gibt der Server
+       nichts heraus und plant nichts ein. Dieses Geraet schickt denselben
+       Schluessel mit, den Quantus am Rechner fuehrt — aus den lokalen
+       Einstellungen, nie aus dem Quelltext und nie in der Adresse. */
+    var kopf = Object.assign({ "Content-Type": "application/json" },
+      (a && typeof a.queueAuthHeaders === "function") ? a.queueAuthHeaders() : {});
+    var response = await fetch(base + "/.netlify/functions/mail-queue", {
+      method: "POST",
+      headers: kopf,
+      body: JSON.stringify(body)
+    });
+    var data = await response.json().catch(function () { return {}; });
+    if (!response.ok || data.ok === false) throw new Error(data.grund || data.error || ("HTTP " + response.status));
+    return data;
+  }
+
+  /* Stabiler Schluessel je VERFASSEN-VORGANG: Geht die Antwort verloren und
+     jemand tippt noch einmal, landet der zweite Versuch auf derselben Stelle
+     im Ausgang statt als zweiter Eintrag — und damit spaeter als zweite Mail.
+
+     Befund der Integrationspruefung (13.09.2026): Der Schluessel darf NICHT
+     ueber Dialoge hinweg leben. Bliebe er nach einem gescheiterten Versuch
+     stehen, naehme die naechste, ganz andere Mail denselben Schluessel — der
+     Server antwortete mit dem alten Eintrag und meldete Erfolg, waehrend die
+     neue Mail nie hinausginge. Vergeben wird er beim Oeffnen des Formulars. */
+  function anfrageSchluessel() {
+    try { if (window.crypto && crypto.randomUUID) return "a" + crypto.randomUUID().replace(/-/g, ""); } catch (error) { /* aeltere Browser */ }
+    return "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  }
+
+  function zuercherZeit(ms) {
+    var t = Number(ms);
+    if (!isFinite(t)) return "";
+    try {
+      return new Intl.DateTimeFormat("de-CH", { timeZone: VERSANDZONE, day: "2-digit", month: "2-digit",
+        year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(t));
+    } catch (error) { return new Date(t).toLocaleString("de-CH"); }
   }
 
   function headerOf(headers, name) {
@@ -232,8 +287,63 @@
       '<div class="mail-body">' + esc(text || item.snippet || "") + "</div></div>";
   }
 
+  function ausgangRowHtml(entry) {
+    var laeuft = entry.status === "sendet";
+    /* Ungeklaert: der Versand war angestossen, der Ausgang ist offen. Hier
+       wird nichts wiederholt und nichts behauptet — hier wird gefragt. */
+    if (entry.status === "unklar") {
+      return '<div class="mail-row"><div class="mail-row-main">' +
+        '<div class="mail-row-top"><span class="mail-from">An: ' + esc(entry.to || "") +
+          '</span><span class="mail-when">❓ Ungeklaert</span></div>' +
+        '<div class="mail-subject">' + esc(entry.subject || "(kein Betreff)") + "</div>" +
+        '<div class="mail-snippet">' + esc(entry.letzterFehler || "Der Versand wurde angestossen, der Ausgang ist ungeklaert.") +
+          " Bitte in Gmail unter Gesendet nachsehen.</div>" +
+        '<div class="row-actions">' +
+          '<button class="btn primary" data-action="mail-outbox-sent" data-id="' + esc(entry.id) + '">Ist gesendet</button>' +
+          '<button class="btn" data-action="mail-outbox-unsent" data-id="' + esc(entry.id) + '">Nicht gesendet</button>' +
+        "</div></div></div>";
+    }
+    var kopf = laeuft ? "Wird gerade gesendet"
+      : entry.status === "fehlgeschlagen" ? "Nicht gesendet — " + esc(entry.letzterFehler || "Grund unbekannt")
+      : "Geht " + esc(zuercherZeit(entry.sendAt)) + " raus (" + VERSANDZONE + ")";
+    return '<div class="mail-row">' +
+      '<div class="mail-row-main">' +
+        '<div class="mail-row-top"><span class="mail-from">An: ' + esc(entry.to || "(Empfaenger?)") +
+          (entry.hatAnhaenge ? " 📎" : "") + '</span><span class="mail-when">🕒 ' + kopf + "</span></div>" +
+        '<div class="mail-subject">' + esc(entry.subject || "(kein Betreff)") + "</div>" +
+        '<div class="mail-snippet">' + esc(String(entry.vorschau || entry.koerper || "").slice(0, 140)) + "</div>" +
+        (laeuft ? '<p class="muted small">Gmail uebernimmt gerade — jetzt geht nichts mehr.</p>'
+          : '<div class="row-actions">' +
+            '<button class="btn" data-action="mail-outbox-now" data-id="' + esc(entry.id) + '">Jetzt senden</button>' +
+            '<button class="btn" data-action="mail-outbox-cancel" data-id="' + esc(entry.id) + '">Abbrechen</button>' +
+          "</div>") +
+      "</div></div>";
+  }
+
+  function ausgangHtml() {
+    var a = api();
+    if (ui.loading && !ui.ausgang.length) return '<p class="muted" style="padding:18px">Ausgang wird geladen…</p>';
+    if (ui.error && !ui.ausgang.length) {
+      var gesperrt = /GESPERRT|KEIN_ZUGANG|Zugangsschl/i.test(ui.error);
+      return '<div class="mail-error">' +
+        (a ? a.emptyState(gesperrt ? "🔒" : "⚠",
+          gesperrt ? "Ausgang gesperrt" : "Ausgang nicht erreichbar",
+          gesperrt
+            ? "Der Server gibt den Ausgang nur mit Ausgangs-Schluessel heraus. Trag ihn in den Einstellungen unter „Ausgangs-Schluessel\" ein — denselben Wert wie MAIL_QUEUE_AUTH_TOKEN auf dem Server. (" + ui.error + ")"
+            : "Der geplante Versand liegt auf dem Server. (" + ui.error + ")") : "") +
+        '<div class="row-actions" style="justify-content:center"><button class="btn primary" data-action="mail-refresh">Erneut versuchen</button></div></div>';
+    }
+    if (!ui.ausgang.length) {
+      return a ? a.emptyState("🕒", "Nichts geplant",
+        "Neue Mails gehen standardmaessig erst in drei Stunden raus und stehen bis dahin hier — abbrechbar oder sofort sendbar. Verschickt werden sie vom Server, auch wenn dieses Tablet aus ist.")
+        : '<p class="muted" style="padding:18px">Nichts geplant.</p>';
+    }
+    return '<div class="mail-list">' + ui.ausgang.map(ausgangRowHtml).join("") + "</div>";
+  }
+
   function listHtml() {
     var a = api();
+    if (ui.folder === "outbox" && !ui.search) return ausgangHtml();
     if (ui.loading && !ui.list.length) return '<p class="muted" style="padding:18px">Nachrichten werden geladen…</p>';
     if (ui.error && !ui.list.length) {
       return '<div class="mail-error">' +
@@ -273,6 +383,20 @@
   // ── Datenfluss ──────────────────────────────────────────────────────────
   async function refresh(showSpinner) {
     if (showSpinner !== false) { ui.loading = true; ui.error = ""; rerender(); }
+    // Der Ausgang liegt nicht bei Gmail, sondern in der Warteschlange.
+    if (ui.folder === "outbox" && !ui.search) {
+      try {
+        var antwort = await queueRpc("liste", {});
+        ui.ausgang = (antwort.eintraege || []).filter(function (entry) {
+          return entry && (entry.status === "geplant" || entry.status === "sendet"
+            || entry.status === "fehlgeschlagen" || entry.status === "unklar");
+        });
+        ui.error = "";
+      } catch (error) { ui.error = error.message || String(error); }
+      ui.loading = false;
+      rerender();
+      return;
+    }
     try {
       ui.list = await fetchList();
       ui.error = "";
@@ -319,6 +443,7 @@
   function composeSheet(options) {
     var a = api();
     if (!a) return;
+    ui.sendeSchluessel = anfrageSchluessel();   // neues Formular, neuer Schluessel
     var data = options || {};
     a.sheet(data.title || "Neue E-Mail",
       '<form data-form="mail-compose"><div class="form-grid">' +
@@ -326,9 +451,9 @@
       '<div class="field full"><label>Kopie (optional)</label><input name="cc" type="email"></div>' +
       '<div class="field full"><label>Betreff</label><input name="subject" value="' + esc(data.subject || "") + '"></div>' +
       '<div class="field full"><label>Text</label><textarea name="text" rows="14">' + esc(data.body || "") + "</textarea></div>" +
-      '</div><p class="muted small">Vor dem Versand erscheint eine Bestaetigung mit Vorschau.</p>' +
+      '</div><p class="muted small">Die Mail geht erst in rund drei Stunden raus und steht bis dahin im Ausgang — abbrechbar oder sofort sendbar.</p>' +
       '<div class="sheet-foot"><button class="btn" type="button" data-action="close-overlay">Abbrechen</button>' +
-      '<button class="btn primary" type="submit">Senden…</button></div></form>', "wide");
+      '<button class="btn primary" type="submit">Senden (in 3 h)…</button></div></form>', "wide");
   }
 
   // ── Abwesenheitsantwort (VacationSettings) ─────────────────────────────
@@ -531,6 +656,32 @@
     }
 
     if (action === "mail-compose") { composeSheet({}); return true; }
+
+    if (action === "mail-outbox-sent" || action === "mail-outbox-unsent") {
+      var kid = button.dataset.id;
+      var gesendet = action === "mail-outbox-sent";
+      var frage = gesendet
+        ? "Hast du in Gmail gesehen, dass diese Mail wirklich gesendet wurde?\n\nSie wird dann als gesendet vermerkt; es wird nichts verschickt."
+        : "Hast du in Gmail gesehen, dass diese Mail NICHT gesendet wurde?\n\nSie wird dann neu eingeplant.";
+      if (!confirm(frage)) return true;
+      queueRpc(gesendet ? "geklaert-gesendet" : "geklaert-nicht-gesendet", { id: kid }).then(function () {
+        notify("Geklaert", gesendet ? "Als gesendet vermerkt." : "Neu eingeplant.", "ok");
+      }).catch(function (error) {
+        notify("Nicht geklaert", error.message || String(error), "error");
+      }).then(function () { refresh(false); });
+      return true;
+    }
+
+    if (action === "mail-outbox-now" || action === "mail-outbox-cancel") {
+      var id = button.dataset.id;
+      if (action === "mail-outbox-cancel" && !confirm("Diese geplante Mail abbrechen?\n\nSie geht dann nicht raus.")) return true;
+      queueRpc(action === "mail-outbox-now" ? "sofort" : "abbrechen", { id: id }).then(function () {
+        notify(action === "mail-outbox-now" ? "Wird gesendet" : "Abgebrochen", "", "ok");
+      }).catch(function (error) {
+        notify("Nicht moeglich", error.message || String(error), "error");
+      }).then(function () { refresh(false); });
+      return true;
+    }
     if (action === "mail-vacation") { openVacationSheet(); return true; }
 
     if (action === "mail-note") {
@@ -591,14 +742,22 @@
     var subject = String(data.get("subject") || "");
     var text = String(data.get("text") || "");
     if (!to) { notify("Empfaenger fehlt", "Bitte eine Adresse eintragen.", "error"); return true; }
-    if (!confirm("E-Mail an " + to + " senden?\n\nBetreff: " + (subject || "(kein Betreff)"))) return true;
+    if (!confirm("E-Mail an " + to + " in drei Stunden senden?\n\nBetreff: " + (subject || "(kein Betreff)") +
+      "\n\nSie steht bis dahin im Ausgang und laesst sich abbrechen oder sofort senden.")) return true;
     try {
-      await rpc("POST", "/users/me/messages/send", {}, { raw: encodeRaw({ to: to, cc: cc, subject: subject, text: text }) });
+      if (!ui.sendeSchluessel) ui.sendeSchluessel = anfrageSchluessel();   // Notnagel
+      var geplant = await queueRpc("plane", {
+        anfrageSchluessel: ui.sendeSchluessel,
+        raw: encodeRaw({ to: to, cc: cc, subject: subject, text: text }),
+        to: to, cc: cc, subject: subject, koerper: text,
+        vorschau: String(text).slice(0, 300), hatAnhaenge: false, quelle: "tablet"
+      });
+      ui.sendeSchluessel = null;
       if (a) a.closeOverlay();
-      notify("Gesendet", to, "ok");
-      if (ui.folder === "sent") refresh(false);
+      notify("Geplant", "Geht " + zuercherZeit((geplant.eintrag || {}).sendAt) + " raus (" + VERSANDZONE + ").", "ok");
+      if (ui.folder === "outbox") refresh(false);
     } catch (error) {
-      notify("Senden fehlgeschlagen", error.message || String(error), "error");
+      notify("Nicht geplant", error.message || String(error), "error");
     }
     return true;
   }
