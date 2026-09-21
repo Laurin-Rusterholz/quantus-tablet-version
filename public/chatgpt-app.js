@@ -7,7 +7,14 @@
  *              Erfassen, kein Abloesen (das gehoert an den Rechner).
  *   · Leads  — Leseansicht: Eingang nach Gruppen, Detail mit allen Schritten
  *              in fester Reihenfolge, Bewertungsraster, Zuweisung und
- *              erteilten Berechtigungen. Kein Bearbeiten, kein Abschliessen.
+ *              erteilten Berechtigungen. Kein Bearbeiten, kein Abschliessen —
+ *              MIT GENAU ZWEI SCHMALEN AUSNAHMEN (Tagesbriefing-Gesamtkonzept-v2,
+ *              "compact parity"): eine offene Rueckfrage des Assistenten
+ *              (pendingQuestion) laesst sich einmalig beantworten, und ein
+ *              zurueckgekommenes Cowork-Paket laesst sich als geprueft
+ *              markieren. Beides setzt nur genau diese Felder plus
+ *              operationalState/updatedAt — kein Bewerten, kein Zuweisen,
+ *              kein freies Editieren irgendeines anderen Feldes.
  *   · ChatGPT-Aufgaben — Marker am Element und Anlegen (einzeiliges Feld im
  *              Formular einer Sammlung). Keine Sammelansicht.
  *
@@ -125,6 +132,48 @@
     { key: "quantusNaehe", label: "Quantus-Nähe" }, { key: "recherche", label: "Recherche" }, { key: "zuschnitt", label: "Zuschnitt" }
   ];
   var ASSIGNEE = { chatgpt: "ChatGPT", cowork: "Claude Cowork" };
+  // Neue, rein additive Felder aus AI Sync (Tagesbriefing-Gesamtkonzept-v2).
+  // Reine Anzeige — "nicht gesetzt" statt eine Erfindung, wenn das Feld fehlt.
+  var OPERATIONAL_STATE = {
+    doing: "In Arbeit", waiting_external: "Wartet extern", followup_scheduled: "Nachfrage geplant",
+    decision_required: "Entscheid nötig", information_required: "Information nötig",
+    delegated_cowork: "An Cowork delegiert", review: "Prüfung", done: "Erledigt", cancelled: "Abgebrochen"
+  };
+  function opStateLabel(value) { return OPERATIONAL_STATE[value] || (value ? String(value) : "nicht gesetzt"); }
+  function operationalLine(l) {
+    var line = '<div class="muted small cg-opline">Status: <strong>' + esc(opStateLabel(l.operationalState)) + "</strong>";
+    if (l.responsibleParty) line += " · Verantwortlich: " + esc(l.responsibleParty);
+    if (l.nextAction || l.nextActionAt) {
+      line += " · Nächster Schritt: " + esc(l.nextAction || "nicht gesetzt") +
+        (l.nextActionAt ? " (" + esc(fmtDateTime(l.nextActionAt)) + ")" : "");
+    }
+    if (l.waitingOn || l.waitingSince || l.followUpAt) {
+      line += " · Wartet auf: " + esc(l.waitingOn || "nicht gesetzt") +
+        (l.waitingSince ? " seit " + esc(fmtDateTime(l.waitingSince)) : "") +
+        (l.followUpAt ? " · Nachfrage " + esc(fmtDateTime(l.followUpAt)) : "");
+    }
+    return line + "</div>";
+  }
+  // Rueckfrage des Assistenten — einmalig beantwortbar (answeredAt gesetzt
+  // heisst: erledigt, kein zweites Mal). Sobald beantwortet, nur noch Anzeige.
+  function questionBlock(l) {
+    var q = obj(l.pendingQuestion);
+    if (!q.text) return "";
+    if (q.answeredAt) {
+      return '<div class="cg-question cg-question-done"><div class="cg-step-head"><strong>Rückfrage beantwortet</strong></div>' +
+        '<div class="cg-step-text">' + esc(q.text) + "</div>" +
+        '<div class="muted small">Antwort: ' + esc(q.answer || "") + " · " + esc(fmtDateTime(q.answeredAt)) + "</div></div>";
+    }
+    var options = arr(q.options);
+    return '<div class="cg-question cg-question-open" data-cg-question data-id="' + attr(l.id) + '">' +
+      '<div class="cg-step-head"><strong>Rückfrage vom Assistenten</strong> <span class="cg-warn small">offen</span></div>' +
+      '<div class="cg-step-text">' + esc(q.text) + "</div>" +
+      (options.length ? '<div class="chip-row">' + options.map(function (o) { return '<span class="chip">' + esc(o) + "</span>"; }).join("") + "</div>" : "") +
+      (q.recommendation ? '<div class="muted small">Empfehlung: ' + esc(q.recommendation) + "</div>" : "") +
+      '<textarea data-action="cg-question-input" rows="2" placeholder="Antwort…"></textarea>' +
+      '<button class="btn small-btn" type="button" data-action="cg-question-submit" data-id="' + attr(l.id) + '">Antworten</button>' +
+      "</div>";
+  }
   function linkCount(l) {
     var n = 0;
     Object.keys(obj(l)).forEach(function (k) { if (/^linked[A-Z]/.test(k) && Array.isArray(l[k])) n += l[k].length; });
@@ -170,9 +219,13 @@
       (t.complete ? "" : ' <span class="cg-warn">(' + t.filled + "/" + ASSESSMENT.length + " bewertet)</span>") + "</div>" +
       (String(l.assignmentReason || "").trim() ? '<div class="muted small cg-reason">' + esc(l.assignmentReason) + "</div>" : "") +
       '<div class="muted small cg-perms">' + permissions(l.grantedPermissions) + "</div>" +
-      (l.assignee === "cowork" ? '<div class="muted small">' + (l.handoverAt ? "Übergeben " + esc(fmtDateTime(l.handoverAt)) : "noch nicht übergeben") +
-        (l.returnedAt ? " · zurück " + esc(fmtDateTime(l.returnedAt)) : "") + "</div>" : "") +
+      ((l.assignee === "cowork" || l.handoverAt || l.expectedReturnAt || l.returnedAt) ? '<div class="muted small cg-handover">' +
+        (l.handoverAt ? "Übergeben " + esc(fmtDateTime(l.handoverAt)) : "noch nicht übergeben") +
+        (l.expectedReturnAt ? " · erwartet zurück " + esc(fmtDateTime(l.expectedReturnAt)) : "") +
+        (l.returnedAt ? " · zurück " + esc(fmtDateTime(l.returnedAt)) + (l.returnChecked ? " · geprüft" : " · ungeprüft") : "") +
+        "</div>" : "") +
       (l.handoverPacket ? '<details class="cg-packet"><summary class="muted small">📦 Übergabepaket (' + String(l.handoverPacket).length + " Zeichen)</summary><pre class=\"cg-packet-text\">" + esc(l.handoverPacket) + "</pre></details>" : "") +
+      (l.returnedAt && !l.returnChecked ? '<button class="btn small-btn cg-return-btn" type="button" data-action="cg-return-checked" data-id="' + attr(l.id) + '">Rücklauf geprüft</button>' : "") +
       "</div>";
   }
   function leadCard(l) {
@@ -185,7 +238,9 @@
       '<span class="muted small">' + esc(fmtDate(l.createdAt)) + "</span></div>" +
       "<h3>" + esc(l.title || "(Ohne Titel)") + "</h3>" +
       "<p>" + esc(String(l.rawInput || "").slice(0, 160)) + (String(l.rawInput || "").length > 160 ? "…" : "") + "</p>" +
+      operationalLine(l) +
       assessmentSummary(l) +
+      questionBlock(l) +
       (l.status !== "abgeschlossen" ? '<div class="cg-progress"><div class="cg-progress-bar" style="width:' + Math.round(p.done / p.total * 100) + '%"></div></div>' : "") +
       (l.status === "wartet" && l.blockedReason ? '<div class="muted small cg-warn">⏸ ' + esc(l.blockedReason) + "</div>" : "") +
       "</article>";
@@ -231,10 +286,12 @@
       '<span class="muted small">Erfasst ' + esc(fmtDateTime(l.createdAt)) + (l.readAt ? " · gelesen " + esc(fmtDateTime(l.readAt)) : " · ungelesen") +
       (l.closedAt ? " · abgeschlossen " + esc(fmtDateTime(l.closedAt)) : "") + "</span></div>" +
       "<h2>" + esc(l.title || "(Ohne Titel)") + "</h2>" +
+      operationalLine(l) +
       '<section class="cg-step"><div class="cg-step-head"><strong>Wortlaut (Laurin)</strong></div><div class="cg-step-text cg-raw">' + esc(l.rawInput || "") + "</div>" +
       (l.obsoleteReason ? '<div class="muted small">Hinfällig, weil: ' + esc(l.obsoleteReason) + "</div>" : "") + "</section>" +
       '<div class="cg-progress-line"><strong>Fortschritt</strong> ' + p.done + "/" + p.total + '<div class="cg-progress"><div class="cg-progress-bar" style="width:' + Math.round(p.done / p.total * 100) + '%"></div></div></div>' +
       (l.status === "wartet" && l.blockedReason ? '<div class="cg-warn">⏸ Wartet: ' + esc(l.blockedReason) + "</div>" : "") +
+      questionBlock(l) +
       steps +
       '<section class="cg-step' + (links.length ? " done" : "") + '"><div class="cg-step-head"><span class="cg-step-no">9</span><strong>Verknüpfungen</strong> <span class="cg-warn small">mindestens eine</span></div>' +
       (links.length ? '<div class="chip-row">' + links.map(function (x) { return '<span class="chip">' + esc(x) + "</span>"; }).join("") + "</div>" : '<div class="muted small">Keine Verknüpfungen.</div>') + "</section>" +
@@ -367,6 +424,59 @@
     });
   }
 
+  // ── Die zwei schmalen Ausnahmen vom "nur lesen" ─────────────────────────
+  // Beides schreibt ausschliesslich die hier genannten Felder auf GENAU
+  // diesem Lead (dieselbe id, dieselbe Sammlung chatgptLeads) — kein neues
+  // Element, keine zweite Fassung, kein Bewerten/Zuweisen/Abschliessen.
+  //
+  // Rueckfrage des Assistenten: einmalig beantwortbar. answeredAt ist die
+  // Sperre — ein zweiter Aufruf auf einem bereits beantworteten oder
+  // fehlenden pendingQuestion tut nichts (kein zweites Schreiben moeglich).
+  function answerQuestion(id, text) {
+    var a = api();
+    text = String(text || "").trim();
+    if (!a || !text) return Promise.resolve(false);
+    var l = leads().filter(function (x) { return x.id === id; })[0];
+    if (!l || !l.pendingQuestion || l.pendingQuestion.answeredAt) return Promise.resolve(false);
+    var now = new Date().toISOString();
+    // Auf demselben Objekt, keine Kopie — die Operation unten haelt fest,
+    // was zu persistieren ist.
+    l.pendingQuestion.answer = text;
+    l.pendingQuestion.answeredAt = now;
+    l.operationalState = "doing";
+    l.updatedAt = now;
+    return a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", id, {
+      pendingQuestion: Object.assign({}, l.pendingQuestion), operationalState: "doing", updatedAt: now
+    }), { silent: true }).then(function () { return true; });
+  }
+  // Cowork-Ruecklauf als geprueft markieren — nur wenn wirklich zurueck UND
+  // noch nicht geprueft; sonst kein zweites Setzen.
+  function markReturnChecked(id) {
+    var a = api();
+    if (!a) return Promise.resolve(false);
+    var l = leads().filter(function (x) { return x.id === id; })[0];
+    if (!l || !l.returnedAt || l.returnChecked) return Promise.resolve(false);
+    var now = new Date().toISOString();
+    l.returnChecked = true;
+    l.operationalState = "doing";
+    l.updatedAt = now;
+    return a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", id, {
+      returnChecked: true, operationalState: "doing", updatedAt: now
+    }), { silent: true }).then(function () { return true; });
+  }
+  function submitQuestionAnswer(button) {
+    var wrap = button.closest ? button.closest("[data-cg-question]") : null;
+    var area = wrap && wrap.querySelector ? wrap.querySelector('[data-action="cg-question-input"]') : null;
+    var a = api();
+    var text = area ? area.value : "";
+    if (!String(text || "").trim()) { if (a) a.toast("Antwort fehlt", "Bitte eine Antwort eintragen.", "warn"); return; }
+    answerQuestion(button.dataset.id, text).then(function (done) {
+      if (!done) return;
+      if (a) a.toast("Antwort gespeichert", "", "ok");
+      if (a) a.render();
+    });
+  }
+
   // ── Aktionen ─────────────────────────────────────────────────────────────
   function onAction(action, button) {
     var a = api();
@@ -380,6 +490,15 @@
       var section = button.closest("[data-cg-section]");
       var input = section ? section.querySelector('[data-action="cg-task-input"]') : null;
       if (input) submitTask(input);
+      return true;
+    }
+    if (action === "cg-question-submit") { submitQuestionAnswer(button); return true; }
+    if (action === "cg-return-checked") {
+      markReturnChecked(button.dataset.id).then(function (done) {
+        if (!done) return;
+        a.toast("Rücklauf geprüft", "", "ok");
+        a.render();
+      });
       return true;
     }
     return false;
@@ -400,6 +519,7 @@
   });
   window.QuantusChatgpt = {
     render: render, onAction: onAction, taskSection: taskSection, marker: marker, createTask: createTask,
+    answerQuestion: answerQuestion, markReturnChecked: markReturnChecked,
     newNotesCount: function () { return newNotes().length; },
     unreadLeadsCount: function () { return unreadLeads().length; },
     openTasksCount: function () { return openTasks().length; },
