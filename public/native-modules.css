@@ -230,3 +230,10 @@
 .cg-question textarea { width: 100%; margin: 8px 0; min-height: 64px; }
 .cg-question .btn { min-height: 40px; }
 .cg-return-btn { margin-top: 8px; min-height: 40px; }
+/* Delegation/Intake/Upload — Master-PDF-Ausnahmen (Tagesbriefing-Gesamtkonzept-v2) */
+.cg-intake { display: flex; gap: 6px; margin: 0 0 12px; }
+.cg-intake input { flex: 1; min-width: 0; min-height: 40px; }
+.cg-intake .btn { min-height: 40px; white-space: nowrap; }
+.cg-upload .btn { min-height: 40px; display: inline-flex; align-items: center; }
+.cg-attachment-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid rgba(127,127,127,.2); }
+.cg-attachment-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

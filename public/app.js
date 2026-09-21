@@ -1322,11 +1322,20 @@
     const contextNotes = CONTEXT_NOTE_COLLECTIONS.has(name)
       ? Notes.notesForSource(collection("notes"), contextSource(name, item).app, item.id).length
       : 0;
+    // Delegation an ChatGPT (Tagesbriefing-Gesamtkonzept-v2, "compact parity"):
+    // kompakter Umschalt-Knopf direkt auf der Aufgabenkarte, gespiegelt von
+    // AI Sync (Desktop) case "task-delegate-chatgpt". Nur bei Aufgaben — die
+    // Schreiblogik selbst lebt in chatgpt-app.js (onAction "cg-task-delegate").
+    const delegated = name === "tasks" && item.assignee === "chatgpt";
+    const delegateButton = name === "tasks" && window.QuantusChatgpt
+      ? `<button class="icon-action" data-action="cg-task-delegate" data-id="${attr(item.id)}" aria-label="${delegated ? "Von ChatGPT zurückholen" : "An ChatGPT delegieren"}">${delegated ? "🤖✓" : "🤖"}</button>`
+      : "";
     return `<article class="entity-card ${pinned ? "pinned" : ""}">
       <div class="row-actions"><span class="badge accent">${esc(config.label)}</span>${item.status ? `<span class="badge">${esc(item.status)}</span>` : ""}${isOverdue(item) ? `<span class="badge coral">Überfällig</span>` : ""}${pinned ? `<span class="badge sand">Angepinnt</span>` : ""}${contextNotes ? `<span class="badge">${contextNotes} Notiz${contextNotes === 1 ? "" : "en"}</span>` : ""}${window.QuantusChatgpt ? window.QuantusChatgpt.marker(name, item.id) : ""}</div>
       <h3>${esc(itemTitle(item,config.label))}</h3><p>${esc(itemText(item) || "Keine Beschreibung")}</p>
       <div class="card-foot"><span class="muted small">${meta ? esc(formatDate(meta)) : ""}</span><span class="spacer"></span>
         ${CONTEXT_NOTE_COLLECTIONS.has(name) ? `<button class="icon-action" data-action="context-note" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Notiz hinzufügen">＋✎</button>` : ""}
+        ${delegateButton}
         <button class="icon-action" data-action="pin-entity" data-id="${attr(item.id)}" aria-label="${pinned ? "Lösen" : "Anpinnen"}">${pinned ? "★" : "☆"}</button>
         <button class="icon-action" data-action="duplicate-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Duplizieren">⧉</button>
         <button class="icon-action" data-action="edit-entity" data-collection="${attr(name)}" data-id="${attr(item.id)}" aria-label="Bearbeiten">✎</button>

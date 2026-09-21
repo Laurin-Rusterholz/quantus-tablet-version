@@ -84,6 +84,11 @@ function datenstand() {
       },
       chatgptTasks: {
         t1: { id: "t1", createdAt: JETZT, updatedAt: JETZT, text: "Adresse nachtragen", state: "offen", anchorKind: "organization", anchorId: "o1", anchorLabel: "Firma X AG", createdBy: "laurin" }
+      },
+      // Fuer die Delegation (Master-PDF-Ausnahme, Abschnitt 9): eine
+      // gewoehnliche Aufgabe ohne bisherige Delegation.
+      tasks: {
+        tk1: { id: "tk1", createdAt: JETZT, updatedAt: JETZT, title: "Rückruf bei Firma X", assignee: "user" }
       }
     },
     chatgptNotesMeta: { lastSessionReadAt: GELESEN }
@@ -181,7 +186,13 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
   ok(reihenfolge.every((pos, i) => i === 0 || pos > reihenfolge[i - 1]), "die Schritte stehen nicht in der festen Reihenfolge untereinander");
   ok(/organizations: Firma X AG/.test(detail), "die Verknuepfung zur Organisation wird nicht aufgeloest");
   ok(/data-action="cg-lead-back"/.test(detail), "es gibt keinen Weg zurueck in den Eingang");
-  ok(!/<textarea|<input|data-form=/.test(detail), "das Lead-Detail auf dem Tablet enthaelt Eingabefelder");
+  // Master-PDF-Ausnahme (Tagesbriefing-Gesamtkonzept-v2): genau EIN Eingabefeld
+  // ist im Lead-Detail erlaubt — der Datei-Upload fuer den Dokument-Anhang.
+  // Alles andere (freies Editieren) bleibt verboten.
+  ok(!/<textarea|<input(?!\s+data-action="cg-lead-upload-input")|data-form=/.test(detail),
+    "das Lead-Detail auf dem Tablet enthaelt Eingabefelder ausserhalb des Dokument-Anhangs");
+  ok(/data-action="cg-lead-upload-input"[^>]*type="file"[^>]*data-id="l1"/.test(detail), "der Dokument-Anhang fehlt im Lead-Detail oder traegt nicht die richtige Lead-Id");
+  ok(/Keine Anhänge\./.test(detail), "ein Lead ohne Dateien zeigt keinen ehrlichen Platzhalter fuer Anhaenge");
 }
 
 // ═══ 3. CHATGPT-AUFGABEN: MARKER AM ELEMENT, ANLEGEN NUR MIT ANKER ════════
@@ -291,7 +302,7 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
     ok(/Status: <strong>nicht gesetzt<\/strong>/.test(inboxNachPruefung), "ein Lead ohne operationalState zeigt keinen ehrlichen Platzhalter");
     ok(/Status: <strong>Wartet extern<\/strong>/.test(inboxNachPruefung), "operationalState wird nicht als deutsches Label angezeigt");
     ok(/Wartet auf: Antwort von Firma X/.test(inboxNachPruefung) && /Verantwortlich: Laurin/.test(inboxNachPruefung), "waitingOn/responsibleParty fehlen in der Anzeige");
-    ok(/Status: <strong>Nachfrage geplant<\/strong>/.test(inboxNachPruefung), "operationalState 'followup_scheduled' fehlt in der Anzeige");
+    ok(/Status: <strong>Follow-up terminiert<\/strong>/.test(inboxNachPruefung), "operationalState 'followup_scheduled' fehlt in der Anzeige");
     ok(/Nächster Schritt: Angebot nachfassen/.test(inboxNachPruefung), "nextAction fehlt in der Anzeige");
 
     // ═══ 8. KONFLIKT/RETRY: KEINE MUTATION VOR DER OPERATION ═══════════════
@@ -360,6 +371,126 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
     ok(geschlossenRuecklauf === false, "ein Ruecklauf auf einem abgeschlossenen Lead liess sich pruefen");
     ok(payload.entities.chatgptLeads.l11.returnChecked === false, "ein abgeschlossener Lead wurde durch die Ruecklaufpruefung reaktiviert");
 
+    // ═══ 9. DELEGATION: AUFGABE → CHATGPT (Master-PDF-Ausnahme) ═════════════
+    // App-Besitzer-Vorgabe: Delegation ist auf dem Tablet compact vorhanden.
+    // Spiegelt AI Sync (Desktop) case "task-delegate-chatgpt": genau EIN Lead
+    // pro Aufgabe, Reaktivierung statt Duplikat, zwei getrennte Operationen.
+    {
+      const leadsVorDelegation = Object.keys(payload.entities.chatgptLeads).length;
+      const geschriebenVorDelegation = geschrieben.length;
+
+      const delegiert = await CG.delegateTask("tk1");
+      ok(delegiert === true, "die Delegation einer Aufgabe an ChatGPT schlug fehl");
+      ok(geschrieben.length === geschriebenVorDelegation + 2,
+        `die Delegation schreibt nicht genau zwei Operationen (Lead + Aufgabe): ${geschrieben.length - geschriebenVorDelegation}`);
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorDelegation + 1, "die Delegation hat nicht genau einen neuen Lead angelegt");
+      const tkNachDelegation = payload.entities.tasks.tk1;
+      ok(tkNachDelegation.assignee === "chatgpt", "die Aufgabe zeigt nach der Delegation nicht auf ChatGPT");
+      ok(Boolean(tkNachDelegation.delegatedLeadId), "die Aufgabe traegt keine delegatedLeadId");
+      const leadId1 = tkNachDelegation.delegatedLeadId;
+      const lead1 = payload.entities.chatgptLeads[leadId1];
+      ok(Boolean(lead1), "der verknuepfte Lead existiert nicht im Datenstand");
+      ok(lead1.operationalState === "doing", "der neue Lead traegt operationalState 'doing' nicht");
+      ok(lead1.title === "Rückruf bei Firma X" && lead1.rawInput === "Delegierte Aufgabe: Rückruf bei Firma X",
+        `der neue Lead traegt Titel/Wortlaut der Aufgabe nicht: ${JSON.stringify({ title: lead1.title, rawInput: lead1.rawInput })}`);
+
+      // Zurueckholen: Aufgabe zurueck an "user", der Lead bleibt bestehen
+      // (Historie), wird aber als hinfaellig geschlossen — kein zweiter,
+      // verwaister Lead beim naechsten Delegieren.
+      const geschriebenVorZurueckholen = geschrieben.length;
+      const zurueckgeholt = await CG.delegateTask("tk1");
+      ok(zurueckgeholt === true, "das Zurueckholen einer delegierten Aufgabe schlug fehl");
+      ok(geschrieben.length === geschriebenVorZurueckholen + 2, "das Zurueckholen schreibt nicht genau zwei Operationen (Lead + Aufgabe)");
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorDelegation + 1, "das Zurueckholen hat einen zusaetzlichen Lead angelegt");
+      ok(payload.entities.tasks.tk1.assignee === "user", "die Aufgabe zeigt nach dem Zurueckholen weiterhin auf ChatGPT");
+      ok(payload.entities.chatgptLeads[leadId1].status === "abgeschlossen" && payload.entities.chatgptLeads[leadId1].operationalState === "cancelled",
+        "der zurueckgeholte Lead wird nicht als hinfaellig geschlossen markiert");
+      ok(payload.entities.chatgptLeads[leadId1].obsoleteReason === "Aufgabe wieder zurückgeholt", "der Grund fuer die Schliessung fehlt");
+
+      // Erneutes Delegieren: GENAU DERSELBE Lead wird reaktiviert (Idempotenz)
+      // — beliebig viele Wechsel duerfen nie einen zweiten Lead fuer dieselbe
+      // Aufgabe anlegen.
+      const wiederDelegiert = await CG.delegateTask("tk1");
+      ok(wiederDelegiert === true, "das erneute Delegieren derselben Aufgabe schlug fehl");
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorDelegation + 1,
+        "das erneute Delegieren hat einen zweiten Lead angelegt statt denselben wiederzuverwenden");
+      ok(payload.entities.tasks.tk1.assignee === "chatgpt" && payload.entities.tasks.tk1.delegatedLeadId === leadId1,
+        "das erneute Delegieren zeigt nicht wieder auf denselben Lead");
+      ok(payload.entities.chatgptLeads[leadId1].status === "neu" && payload.entities.chatgptLeads[leadId1].operationalState === "doing",
+        "der reaktivierte Lead ist nicht wieder aktiv (status/operationalState)");
+      ok(payload.entities.chatgptLeads[leadId1].closedAt === null && payload.entities.chatgptLeads[leadId1].closedBy === null,
+        "der reaktivierte Lead traegt noch die alten Schliessungsfelder");
+
+      // Eine nicht existierende Aufgabe darf nichts schreiben.
+      const geschriebenVorFehlschlag = geschrieben.length;
+      ok((await CG.delegateTask("gibt-es-nicht")) === false, "die Delegation einer nicht existierenden Aufgabe wurde als Erfolg gemeldet");
+      ok(geschrieben.length === geschriebenVorFehlschlag, "die Delegation einer nicht existierenden Aufgabe hat trotzdem geschrieben");
+    }
+
+    // ═══ 10. INTAKE: ANFRAGE EINREICHEN (Master-PDF-Ausnahme) ═══════════════
+    {
+      modul.onAction("cg-lead-back", {});
+      modul.onAction("cg-tab", { dataset: { tab: "notes" } });
+      const notesMitIntake = modul.render("chatgptnotes");
+      ok(/data-action="cg-intake-input"/.test(notesMitIntake) && /data-action="cg-intake-submit"/.test(notesMitIntake),
+        "das Intake-Feld fehlt auf dem Hauptbildschirm (Notes)");
+
+      const leadsVorIntake = Object.keys(payload.entities.chatgptLeads).length;
+      const geschriebenVorIntake = geschrieben.length;
+      ok((await CG.addChatgptLead("", "   ")) === null, "eine leere Anfrage wurde als Lead angelegt");
+      ok(geschrieben.length === geschriebenVorIntake, "eine leere Anfrage hat trotzdem geschrieben");
+
+      const neueLeadId = await CG.addChatgptLead("", "Bitte Rechnung Nr. 4711 pruefen\nDetails folgen per Mail.");
+      ok(Boolean(neueLeadId), "die Anfrage wurde nicht als Lead angelegt");
+      ok(geschrieben.length === geschriebenVorIntake + 1, "die Anfrage wurde nicht als genau eine Operation geschrieben");
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorIntake + 1, "die Anfrage hat nicht genau einen Lead angelegt");
+      const neuerLead = payload.entities.chatgptLeads[neueLeadId];
+      ok(neuerLead.title === "Bitte Rechnung Nr. 4711 pruefen", "der Titel des neuen Leads kommt nicht aus der ersten Zeile der Anfrage");
+      ok(neuerLead.rawInput === "Bitte Rechnung Nr. 4711 pruefen\nDetails folgen per Mail.", "der volle Wortlaut der Anfrage fehlt im Lead");
+      ok(neuerLead.status === "neu" && neuerLead.assessment && neuerLead.assessment.menge === null,
+        "der neue Lead traegt nicht die Standardform (Status/Assessment)");
+    }
+
+    // ═══ 11. DOKUMENT-ANHANG: BESTEHENDER ~50MB-UPLOAD, UNVERAENDERT ════════
+    {
+      modul.onAction("cg-lead-open", { dataset: { id: "l1" } });
+
+      // Ohne window.QuantusTabletWorkspace darf nichts passieren (Modulgrenze,
+      // CLAUDE.md Fallstrick 1) — kein Fehler, kein stiller Erfolg.
+      const geschriebenOhneWorkspace = geschrieben.length;
+      ok((await CG.attachDocument("l1", [{ name: "a.pdf", size: 100 }])) === false, "ein Anhang ohne Tablet Canvas wurde als Erfolg gemeldet");
+      ok(geschrieben.length === geschriebenOhneWorkspace, "ein Anhang ohne Tablet Canvas hat trotzdem geschrieben");
+      ok((await CG.attachDocument("l1", [])) === false, "ein Anhang ohne ausgewaehlte Datei wurde als Erfolg gemeldet");
+
+      // Mit Workspace: der bestehende Upload wird unveraendert aufgerufen —
+      // genau die Sammlung/Id des geoeffneten Leads, keine eigene Upload-
+      // Logik hier in chatgpt-app.js.
+      const aufrufe = [];
+      fensterlos.QuantusTabletWorkspace = {
+        uploadTo(collection, entityId, fileList) {
+          aufrufe.push({ collection, entityId, fileList });
+          // Simuliert das echte Verhalten von tablet-workspace.js: ein
+          // "update" auf genau diesem Lead haengt die Datei an — derselbe
+          // Schreibweg (executeOperation/makeOperation).
+          const files = (payload.entities.chatgptLeads[entityId].files || []).concat(
+            Array.from(fileList).map((f) => ({ id: "f1", name: f.name, size: f.size, url: "https://example.invalid/f1" }))
+          );
+          return bridge.executeOperation(bridge.makeOperation("entity", "update", "chatgptLeads", entityId, { files }));
+        }
+      };
+      const angehaengt = await CG.attachDocument("l1", [{ name: "Vertrag.pdf", size: 204800 }]);
+      ok(angehaengt === true, "der Dokument-Anhang ueber den bestehenden Upload schlug fehl");
+      ok(aufrufe.length === 1 && aufrufe[0].collection === "chatgptLeads" && aufrufe[0].entityId === "l1",
+        `der bestehende Upload wird nicht mit chatgptLeads/l1 aufgerufen: ${JSON.stringify(aufrufe[0] || null)}`);
+      ok(payload.entities.chatgptLeads.l1.files.length === 1 && payload.entities.chatgptLeads.l1.files[0].name === "Vertrag.pdf",
+        "die angehaengte Datei steht nicht im Datenstand");
+
+      const detailNachAnhang = modul.render("chatgptnotes");
+      ok(/Vertrag\.pdf/.test(detailNachAnhang), "die angehaengte Datei wird im Lead-Detail nicht angezeigt");
+      ok(/Öffnen/.test(detailNachAnhang), "die angehaengte Datei bietet keinen Weg zum Oeffnen");
+      delete fensterlos.QuantusTabletWorkspace;
+    }
+
     // ═══ 4. VERDRAHTUNG ════════════════════════════════════════════════════
     ok(html.indexOf('<script src="chatgpt-app.js">') > 0 && html.indexOf('<script src="chatgpt-app.js">') < html.indexOf('<script src="app.js">'),
       "index.html laedt chatgpt-app.js nicht vor app.js");
@@ -370,6 +501,7 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
     ok(/window\.QuantusChatgpt\.marker\(name, item\.id\)/.test(appJs), "die Sammlungskarten zeigen den Marker nicht");
     ok(/window\.QuantusChatgpt\.taskSection\(name, existing\)/.test(appJs), "das Formular einer Sammlung enthaelt das Feld fuer ChatGPT-Aufgaben nicht");
     ok(/key === "chatgptnotes"\) return window\.QuantusChatgpt/.test(appJs), "die Kachel hat keinen Zaehler");
+    ok(/data-action="cg-task-delegate"/.test(appJs), "die Aufgabenkarte (entityCard) bietet keinen Delegations-Knopf an ChatGPT an");
     ok(!/ß/.test(source), "chatgpt-app.js enthaelt ein ß (Schweizer Schreibweise)");
 
     if (luecken.length) {

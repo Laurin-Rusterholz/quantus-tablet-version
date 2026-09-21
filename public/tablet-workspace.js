@@ -424,7 +424,10 @@
 
   async function uploadFiles(fileList) {
     const q = api(), entity = currentEntity(), storage = q?.getStorage?.(); if (!q || !entity || !storage) return q?.toast("Upload nicht verfügbar", "Firebase Storage konnte nicht geladen werden", "error");
-    const collection = ui.collection, entityId = entity.id, config = COLLECTIONS[collection], files = asArray(entity.files).slice();
+    // Fallback fuer Aufrufer ausserhalb der eigenen COLLECTIONS-Liste (z. B.
+    // chatgptLeads ueber uploadTo) — die Upload-Logik selbst bleibt unveraendert,
+    // nur der Namensraum im Storage-Pfad braucht einen Wert.
+    const collection = ui.collection, entityId = entity.id, config = COLLECTIONS[collection] || { kind: collection }, files = asArray(entity.files).slice();
     for (const file of Array.from(fileList || [])) {
       if (file.size > 50 * 1024 * 1024) { q.toast("Datei zu gross", `${file.name} überschreitet 50 MB`, "error"); continue; }
       try {
@@ -457,6 +460,17 @@
   }
 
   function mountRoute() {}
+
+  // Fuer andere Module (z. B. chatgpt-app.js, Dokument-Anhang am Lead): die
+  // bestehende uploadFiles() unveraendert nutzen, nur kurz auf die gewuenschte
+  // Sammlung/Entitaet zeigen und danach den eigenen Arbeitsflaechen-Stand
+  // wiederherstellen — ein offen stehendes Tablet Canvas bekommt davon nichts
+  // zu sehen.
+  function uploadFilesTo(collection, entityId, fileList) {
+    const prevCollection = ui.collection, prevEntityId = ui.entityId;
+    ui.collection = collection; ui.entityId = entityId;
+    return Promise.resolve(uploadFiles(fileList)).finally(() => { ui.collection = prevCollection; ui.entityId = prevEntityId; });
+  }
 
   function open(tab) {
     if (tab) ui.tab = tab;
@@ -580,5 +594,5 @@
     drag = null; renderOverlay();
   });
 
-  window.QuantusTabletWorkspace = { open, close, renderRoute, mountRoute, refresh: renderOverlay };
+  window.QuantusTabletWorkspace = { open, close, renderRoute, mountRoute, refresh: renderOverlay, uploadTo: uploadFilesTo };
 })();

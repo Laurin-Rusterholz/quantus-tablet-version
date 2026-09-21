@@ -7,16 +7,30 @@
  *              Erfassen, kein Abloesen (das gehoert an den Rechner).
  *   · Leads  — Leseansicht: Eingang nach Gruppen, Detail mit allen Schritten
  *              in fester Reihenfolge, Bewertungsraster, Zuweisung und
- *              erteilten Berechtigungen. Kein Bearbeiten, kein Abschliessen —
- *              MIT GENAU ZWEI SCHMALEN AUSNAHMEN (Tagesbriefing-Gesamtkonzept-v2,
- *              "compact parity"): eine offene Rueckfrage des Assistenten
- *              (pendingQuestion) laesst sich einmalig beantworten, und ein
- *              zurueckgekommenes Cowork-Paket laesst sich als geprueft
- *              markieren. Beides setzt nur genau diese Felder plus
- *              operationalState/updatedAt — kein Bewerten, kein Zuweisen,
- *              kein freies Editieren irgendeines anderen Feldes.
+ *              erteilten Berechtigungen. Kein freies Editieren, kein
+ *              Abschliessen — MIT DEN AUSNAHMEN AUS DEM MASTER-PDF
+ *              (Tagesbriefing-Gesamtkonzept-v2, "compact parity"), die der
+ *              App-Besitzer ausdruecklich verlangt hat: eine offene
+ *              Rueckfrage des Assistenten (pendingQuestion) laesst sich
+ *              einmalig beantworten, ein zurueckgekommenes Cowork-Paket
+ *              laesst sich als geprueft markieren, und — neu — Delegation,
+ *              Intake und Dokument-Anhang sind auf dem Tablet ebenfalls
+ *              compact vorhanden (siehe unten). Jede Ausnahme setzt nur
+ *              genau ihre eigenen Felder — kein Bewerten, kein Zuweisen
+ *              eines Leads, kein freies Editieren irgendeines anderen Feldes.
  *   · ChatGPT-Aufgaben — Marker am Element und Anlegen (einzeiliges Feld im
  *              Formular einer Sammlung). Keine Sammelansicht.
+ *   · Delegation — ein Umschalt-Knopf auf der Aufgabenkarte (app.js,
+ *              entityCard) delegiert genau EINE Aufgabe an ChatGPT: legt
+ *              (oder reaktiviert) genau einen verknuepften Lead an, spiegelt
+ *              exakt AI Sync (Desktop) case "task-delegate-chatgpt".
+ *   · Intake  — ein einzeiliges Feld auf dem Hauptbildschirm (Notes/Leads-
+ *              Liste) erstellt sofort einen neuen Lead — die einfachste
+ *              Auspraegung von "Anfrage einreichen" auf dem Tablet, ohne
+ *              eine zweite Warteschlange neben den Leads.
+ *   · Anhang  — im Lead-Detail laesst sich eine Datei an den GEOEFFNETEN
+ *              Lead anhaengen, ueber denselben ~50MB-Upload wie Tablet
+ *              Canvas (window.QuantusTabletWorkspace.uploadTo, unveraendert).
  *
  * Gelesen und geschrieben wird ausschliesslich in entities.chatgptNotes,
  * entities.chatgptLeads und entities.chatgptTasks — genau dort, wo AI Sync
@@ -95,12 +109,21 @@
       (arr(n.tags).length ? '<div class="chip-row">' + arr(n.tags).map(function (t) { return '<span class="chip">#' + esc(t) + "</span>"; }).join("") + "</div>" : "") +
       "</article>";
   }
+  // Intake — "Anfrage einreichen" auf dem Hauptbildschirm (Notes/Leads-
+  // Liste), nicht im Lead-Detail (dort bleibt es bei reinem Lesen plus den
+  // schmalen Ausnahmen). Ein Absenden legt sofort einen Lead an (addChatgptLead)
+  // — die einfachste Auspraegung von "Anfrage einreichen" auf dem Tablet.
+  function renderIntakeBar() {
+    return '<div class="cg-intake"><input type="text" data-action="cg-intake-input" placeholder="Anfrage an ChatGPT einreichen — kurzer Text genügt" autocomplete="off">' +
+      '<button class="btn small-btn" type="button" data-action="cg-intake-submit">Anfrage einreichen</button></div>';
+  }
   function renderNotes() {
     var all = notes();
     var fresh = newNotes();
     var last = lastReadAt();
     var list = ui.notesMode === "all" ? all : fresh;
-    return '<div class="chip-row cg-modes">' +
+    return renderIntakeBar() +
+      '<div class="chip-row cg-modes">' +
       '<button class="chip' + (ui.notesMode !== "all" ? " on" : "") + '" data-action="cg-notes-mode" data-mode="new">Seit letzter Sitzung ' + fresh.length + "</button>" +
       '<button class="chip' + (ui.notesMode === "all" ? " on" : "") + '" data-action="cg-notes-mode" data-mode="all">Alle ' + all.length + "</button>" +
       "</div>" +
@@ -134,10 +157,12 @@
   var ASSIGNEE = { chatgpt: "ChatGPT", cowork: "Claude Cowork" };
   // Neue, rein additive Felder aus AI Sync (Tagesbriefing-Gesamtkonzept-v2).
   // Reine Anzeige — "nicht gesetzt" statt eine Erfindung, wenn das Feld fehlt.
+  // Einheitlich mit AI Sync (Desktop) V3_OPERATIONAL_STATE_LABEL — dieselben
+  // deutschen Bezeichnungen auf allen drei Clients.
   var OPERATIONAL_STATE = {
-    doing: "In Arbeit", waiting_external: "Wartet extern", followup_scheduled: "Nachfrage geplant",
-    decision_required: "Entscheid nötig", information_required: "Information nötig",
-    delegated_cowork: "An Cowork delegiert", review: "Prüfung", done: "Erledigt", cancelled: "Abgebrochen"
+    doing: "In Arbeit (ChatGPT)", waiting_external: "Wartet extern", followup_scheduled: "Follow-up terminiert",
+    decision_required: "Entscheidung gefragt", information_required: "Frage gestellt",
+    delegated_cowork: "Bei Cowork", review: "Cowork-Rücklauf zu prüfen", done: "Erledigt", cancelled: "Storniert"
   };
   function opStateLabel(value) { return OPERATIONAL_STATE[value] || (value ? String(value) : "nicht gesetzt"); }
   function operationalLine(l) {
@@ -260,6 +285,31 @@
     });
     return out;
   }
+  function formatBytes(bytes) {
+    var value = Number(bytes) || 0;
+    if (!value) return "0 B";
+    var units = ["B", "KB", "MB", "GB"];
+    var index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), 3);
+    return (value / Math.pow(1024, index)).toFixed(index ? 1 : 0) + " " + units[index];
+  }
+  // Dokument-Anhang am geoeffneten Lead — ueber denselben ~50MB-Upload wie
+  // Tablet Canvas (window.QuantusTabletWorkspace.uploadTo), keine eigene
+  // Upload-Logik. Anzeige nur der Felder, die der bestehende Upload wirklich
+  // liefert (name/size/url) — kein erfundener "verarbeitet"/"indexiert"-Status.
+  function attachmentSection(l) {
+    var files = arr(l.files);
+    var rows = files.map(function (f) {
+      return '<div class="cg-attachment-row"><span class="cg-attachment-name">' + esc(f.name || "Datei") + "</span>" +
+        '<span class="muted small">' + esc(formatBytes(f.size)) + "</span>" +
+        (f.url ? '<a class="btn small-btn" href="' + attr(f.url) + '" target="_blank" rel="noopener noreferrer">Öffnen</a>' : "") + "</div>";
+    }).join("");
+    return '<section class="cg-step cg-upload"><div class="cg-step-head"><strong>Anhänge</strong>' +
+      (files.length ? ' <span class="badge">' + files.length + "</span>" : "") + "</div>" +
+      '<div class="item-list">' + (rows || '<div class="muted small">Keine Anhänge.</div>') + "</div>" +
+      '<label class="btn small-btn" for="cgLeadUpload-' + attr(l.id) + '">📎 Dokument anhängen</label>' +
+      '<input data-action="cg-lead-upload-input" type="file" id="cgLeadUpload-' + attr(l.id) + '" data-id="' + attr(l.id) + '" style="display:none">' +
+      "</section>";
+  }
   function renderLeadDetail(id) {
     var l = leads().filter(function (x) { return x.id === id; })[0];
     if (!l) { ui.openLead = null; return renderLeads(); }
@@ -298,6 +348,7 @@
       (arr(l.comments).length ? '<section class="cg-step"><div class="cg-step-head"><strong>Kommentare</strong></div>' + arr(l.comments).map(function (c) {
         return '<div class="cg-comment"><span class="muted small">' + esc(fmtDateTime(c.createdAt)) + "</span><div>" + esc(c.text || "") + "</div></div>";
       }).join("") + "</section>" : "") +
+      attachmentSection(l) +
       '<p class="muted small">Bearbeiten, Bewerten und Abschliessen geschieht am Rechner' + (closed ? "" : " — der Lead bleibt hier lesbar") + ".</p>";
   }
   function renderLeads() {
@@ -311,7 +362,8 @@
       return list.length ? '<h2 class="cg-group" style="color:' + color + '">' + esc(title) + " (" + list.length + ")</h2>" +
         '<div class="content-grid">' + list.map(leadCard).join("") + "</div>" : "";
     }
-    return '<p class="muted small">' + unread.length + " ungelesen · " + (active.length + waiting.length) + " offen · " + closed.length + " abgeschlossen — Leads werden am Rechner oder Handy erfasst und vom Assistenten am Rechner bearbeitet.</p>" +
+    return renderIntakeBar() +
+      '<p class="muted small">' + unread.length + " ungelesen · " + (active.length + waiting.length) + " offen · " + closed.length + " abgeschlossen — Leads werden am Rechner oder Handy erfasst und vom Assistenten am Rechner bearbeitet.</p>" +
       group("🔴 Ungelesen", unread, "#D96B5B") +
       group("🟢 Neu / In Arbeit", active, "#2F8C80") +
       group("🟡 Wartet", waiting, "#C9A96E") +
@@ -424,7 +476,115 @@
     });
   }
 
-  // ── Die zwei schmalen Ausnahmen vom "nur lesen" ─────────────────────────
+  // ── Neuer Lead — Standardform wie AI Sync createChatgptLead() ────────────
+  // Genutzt von Intake (Anfrage einreichen) und von der Delegation, wenn noch
+  // kein Lead existiert — eine einzige Stelle fuer die Lead-Grundform, wie am
+  // Rechner. `extra` ueberschreibt/ergaenzt einzelne Felder (z. B.
+  // operationalState bei der Delegation). Ohne Titel UND Wortlaut wird nichts
+  // angelegt.
+  function addChatgptLead(title, rawInput, extra) {
+    var a = api();
+    title = String(title || "").trim();
+    rawInput = String(rawInput || "").trim();
+    if (!a || (!title && !rawInput)) return Promise.resolve(null);
+    if (!title) title = rawInput.split("\n")[0].slice(0, 80);
+    if (!rawInput) rawInput = title;
+    var id = a.Core.makeId("chatgptLead");
+    var patch = Object.assign({
+      title: title, rawInput: rawInput, status: "neu", readAt: null,
+      interpretation: "", openQuestions: "", research: "", plan: "", execution: "", result: "", workflowNote: "",
+      blockedReason: null, closedAt: null, closedBy: null, externalLinks: [], comments: [], files: [],
+      assessment: { menge: null, werkzeug: null, kontext: null, quantusNaehe: null, recherche: null, zuschnitt: null },
+      assignee: null, assignmentReason: "", handoverPacket: null,
+      grantedPermissions: { websuche: false, dateienErstellen: { erlaubt: false, formate: [] }, externeTools: [], verboten: [] },
+      handoverAt: null, returnedAt: null
+    }, extra || {});
+    return a.executeOperation(a.makeOperation("entity", "create", "chatgptLeads", id, patch), { silent: true }).then(function () {
+      return col("chatgptLeads").some(function (x) { return x.id === id; }) ? id : null;
+    });
+  }
+  function submitIntake(input) {
+    var value = String(input.value || "").trim();
+    var a = api();
+    if (!value) { if (a) a.toast("Anfrage fehlt", "Bitte einen Text eintragen.", "warn"); return; }
+    addChatgptLead("", value).then(function (leadId) {
+      if (!leadId) return;
+      input.value = "";
+      if (!a) return;
+      a.toast("Anfrage eingereicht", value.split("\n")[0].slice(0, 60), "ok");
+      a.render();
+    });
+  }
+
+  // ── Delegation: Aufgabe → ChatGPT (Tagesbriefing-Gesamtkonzept-v2) ───────
+  // Spiegelt AI Sync (Desktop), case "task-delegate-chatgpt" in handleClick:
+  // GENAU EIN verknuepfter Lead pro Aufgabe (task.delegatedLeadId ist die
+  // Sperre und wird bei einem geschlossenen Lead reaktiviert statt verdoppelt
+  // — idempotent ueber beliebig viele Delegieren/Zurueckholen-Wechsel), zwei
+  // getrennte Schreiboperationen (Lead, Aufgabe) statt eines zusammengefassten
+  // Patches, damit Lead und Aufgabe auf allen Clients eigene Entitaeten
+  // bleiben. Aufgerufen aus app.js (entityCard, data-action
+  // "cg-task-delegate") ueber onAction unten.
+  function delegateTask(taskId) {
+    var a = api();
+    if (!a) return Promise.resolve(false);
+    var task = col("tasks").filter(function (t) { return t.id === taskId; })[0];
+    if (!task) return Promise.resolve(false);
+    var wasDelegated = (task.assignee || "user") === "chatgpt";
+    var existingLead = task.delegatedLeadId ? leads().filter(function (l) { return l.id === task.delegatedLeadId; })[0] : null;
+    var now = new Date().toISOString();
+
+    if (wasDelegated) {
+      // Zurueckholen: die Aufgabe geht an "user", der verknuepfte Lead bleibt
+      // bestehen (Historie), wird aber als hinfaellig geschlossen — kein
+      // verwaister zweiter Lead beim naechsten Delegieren.
+      var closeOp = existingLead && existingLead.status !== "abgeschlossen"
+        ? a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", existingLead.id, {
+            status: "abgeschlossen", closedAt: now, closedBy: "laurin",
+            obsoleteReason: "Aufgabe wieder zurückgeholt", operationalState: "cancelled", updatedAt: now
+          }), { silent: true })
+        : Promise.resolve(true);
+      var backOp = a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "user" }), { silent: true });
+      return Promise.all([closeOp, backOp]).then(function (r) { return r.every(Boolean); });
+    }
+
+    if (existingLead) {
+      // Wiederverwendung: derselbe Lead wird reaktiviert statt einen zweiten
+      // anzulegen (idempotent).
+      var reusePatch = { operationalState: "doing", updatedAt: now };
+      if (existingLead.status === "abgeschlossen") {
+        reusePatch.status = "neu"; reusePatch.closedAt = null; reusePatch.closedBy = null; reusePatch.obsoleteReason = null;
+      }
+      var reuseOp = a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", existingLead.id, reusePatch), { silent: true });
+      var toChatgptOp = a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt" }), { silent: true });
+      return Promise.all([reuseOp, toChatgptOp]).then(function (r) { return r.every(Boolean); });
+    }
+
+    // Noch kein Lead: genau einen anlegen und auf der Aufgabe vermerken
+    // (delegatedLeadId ist danach die Sperre gegen einen zweiten Lead).
+    return addChatgptLead(task.title, "Delegierte Aufgabe: " + (task.title || ""), { operationalState: "doing" }).then(function (leadId) {
+      if (!leadId) return false;
+      return a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt", delegatedLeadId: leadId }), { silent: true });
+    });
+  }
+
+  // Dokument an den geoeffneten Lead anhaengen — nutzt den bestehenden
+  // ~50MB-Upload aus Tablet Canvas unveraendert (window.QuantusTabletWorkspace.
+  // uploadTo); hier wird nur auf chatgptLeads/<id> gezeigt. Modulgrenze: erst
+  // typeof pruefen (CLAUDE.md, Fallstrick 1), nicht im Kopf annehmen, dass es
+  // da ist.
+  function attachDocument(leadId, fileList) {
+    var a = api();
+    var ws = window.QuantusTabletWorkspace;
+    if (!a || !leadId || !fileList || !fileList.length) return Promise.resolve(false);
+    if (!ws || typeof ws.uploadTo !== "function") {
+      if (a) a.toast("Anhang nicht möglich", "Das Hochladen ist auf diesem Gerät nicht verfügbar.", "warn");
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(ws.uploadTo("chatgptLeads", leadId, fileList)).then(function () { return true; });
+  }
+
+  // ── Zwei weitere schmale Ausnahmen vom "nur lesen" (Rueckfrage, Ruecklauf) ─
   // Beides schreibt ausschliesslich die hier genannten Felder auf GENAU
   // diesem Lead (dieselbe id, dieselbe Sammlung chatgptLeads) — kein neues
   // Element, keine zweite Fassung, kein Bewerten/Zuweisen/Abschliessen.
@@ -517,14 +677,48 @@
       });
       return true;
     }
+    if (action === "cg-intake-submit") {
+      var wrap = button.closest ? button.closest(".cg-intake") : null;
+      var input = wrap && wrap.querySelector ? wrap.querySelector('[data-action="cg-intake-input"]') : null;
+      if (input) submitIntake(input);
+      return true;
+    }
+    // Delegation: Aufgabe → ChatGPT. Der Knopf lebt auf der Aufgabenkarte in
+    // app.js (entityCard) — die Modulgrenze ist hier egal, onAction bekommt
+    // jede Aktion der App gereicht (app.js handleClick, tabletModules()).
+    if (action === "cg-task-delegate") {
+      var task = col("tasks").filter(function (t) { return t.id === button.dataset.id; })[0];
+      var wasDelegated = Boolean(task && (task.assignee || "user") === "chatgpt");
+      delegateTask(button.dataset.id).then(function (done) {
+        if (!done) return;
+        a.toast(wasDelegated ? "Zurückgeholt" : "An ChatGPT delegiert", task ? (task.title || "") : "", "ok");
+        a.render();
+      });
+      return true;
+    }
     return false;
   }
   document.addEventListener("keydown", function (event) {
     if (event.key !== "Enter") return;
-    var input = event.target && event.target.closest ? event.target.closest('[data-action="cg-task-input"]') : null;
+    var taskInput = event.target && event.target.closest ? event.target.closest('[data-action="cg-task-input"]') : null;
+    if (taskInput) { event.preventDefault(); submitTask(taskInput); return; }
+    var intakeInput = event.target && event.target.closest ? event.target.closest('[data-action="cg-intake-input"]') : null;
+    if (intakeInput) { event.preventDefault(); submitIntake(intakeInput); }
+  });
+  // Datei-Input feuert "change", nicht "click" — eigener Listener wie bereits
+  // in tablet-workspace.js ueblich (data-tw-change), hier fuer den Lead-Anhang.
+  document.addEventListener("change", function (event) {
+    var input = event.target && event.target.closest ? event.target.closest('[data-action="cg-lead-upload-input"]') : null;
     if (!input) return;
-    event.preventDefault();
-    submitTask(input);
+    var leadId = input.dataset.id;
+    var fileList = input.files;
+    attachDocument(leadId, fileList).then(function (done) {
+      input.value = "";
+      var a = api();
+      if (!done || !a) return;
+      a.toast("Dokument angehängt", "", "ok");
+      a.render();
+    });
   });
 
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({
@@ -536,6 +730,7 @@
   window.QuantusChatgpt = {
     render: render, onAction: onAction, taskSection: taskSection, marker: marker, createTask: createTask,
     answerQuestion: answerQuestion, markReturnChecked: markReturnChecked,
+    delegateTask: delegateTask, addChatgptLead: addChatgptLead, attachDocument: attachDocument,
     newNotesCount: function () { return newNotes().length; },
     unreadLeadsCount: function () { return unreadLeads().length; },
     openTasksCount: function () { return openTasks().length; },
