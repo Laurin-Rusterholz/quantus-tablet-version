@@ -432,37 +432,53 @@
   // Rueckfrage des Assistenten: einmalig beantwortbar. answeredAt ist die
   // Sperre — ein zweiter Aufruf auf einem bereits beantworteten oder
   // fehlenden pendingQuestion tut nichts (kein zweites Schreiben moeglich).
+  // Review-Fix: die vorherige Fassung schrieb answer/answeredAt/
+  // operationalState/updatedAt DIREKT auf das lebende Lead-Objekt, BEVOR
+  // makeOperation/executeOperation liefen. Da leads() nur die Liste flach
+  // kopiert (die Elemente selbst bleiben dieselben Referenzen wie in
+  // state.payload), war das keine Kopie, sondern eine Mutation des "Vorher"-
+  // Standes: applyEntityOperation liest genau dieses Objekt als `existing`
+  // fuer den Konflikt-/Zeitstempelvergleich — der "Vorher"-Wert enthielt so
+  // bereits den "Nachher"-Wert. Schlimmer: bei einer ABGELEHNTEN Operation
+  // (Konflikt/Tombstone) oder einem Fehlschlag bricht executeOperation vor
+  // dem Setzen von state.payload ab — aber das Lead-Objekt war durch die
+  // Mutation VORHER schon veraendert, der abgelehnte Zustand blieb sichtbar
+  // stehen. Jetzt: keine Mutation vor der Operation, der Patch wird aus
+  // einer reinen Kopie gebaut, und der echte Erfolg/Misserfolg von
+  // executeOperation wird durchgereicht (nicht mehr blind "true").
   function answerQuestion(id, text) {
     var a = api();
     text = String(text || "").trim();
     if (!a || !text) return Promise.resolve(false);
     var l = leads().filter(function (x) { return x.id === id; })[0];
     if (!l || !l.pendingQuestion || l.pendingQuestion.answeredAt) return Promise.resolve(false);
+    // Auf allen Clients gleich behandelt: ein geschlossener Lead wird durch
+    // eine Antwort nicht reaktiviert (Konsistenz mit Desktop/AI Sync).
+    if (l.status === "abgeschlossen") return Promise.resolve(false);
     var now = new Date().toISOString();
-    // Auf demselben Objekt, keine Kopie — die Operation unten haelt fest,
-    // was zu persistieren ist.
-    l.pendingQuestion.answer = text;
-    l.pendingQuestion.answeredAt = now;
-    l.operationalState = "doing";
-    l.updatedAt = now;
-    return a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", id, {
-      pendingQuestion: Object.assign({}, l.pendingQuestion), operationalState: "doing", updatedAt: now
-    }), { silent: true }).then(function () { return true; });
+    var patchQuestion = Object.assign({}, l.pendingQuestion, { answer: text, answeredAt: now });
+    var operation = a.makeOperation("entity", "update", "chatgptLeads", id, {
+      pendingQuestion: patchQuestion, operationalState: "doing", updatedAt: now,
+      // Auf allen Clients gleich: die faellige Rueckfrage ist erledigt,
+      // der letzte Stand wird vermerkt.
+      questionForBriefingAt: null, lastAction: "Antwort erhalten: " + text.slice(0, 140)
+    });
+    return a.executeOperation(operation, { silent: true });
   }
   // Cowork-Ruecklauf als geprueft markieren — nur wenn wirklich zurueck UND
-  // noch nicht geprueft; sonst kein zweites Setzen.
+  // noch nicht geprueft; sonst kein zweites Setzen. Siehe answerQuestion:
+  // keine Mutation vor der Operation, echtes Ergebnis wird durchgereicht.
   function markReturnChecked(id) {
     var a = api();
     if (!a) return Promise.resolve(false);
     var l = leads().filter(function (x) { return x.id === id; })[0];
     if (!l || !l.returnedAt || l.returnChecked) return Promise.resolve(false);
+    if (l.status === "abgeschlossen") return Promise.resolve(false);
     var now = new Date().toISOString();
-    l.returnChecked = true;
-    l.operationalState = "doing";
-    l.updatedAt = now;
-    return a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", id, {
+    var operation = a.makeOperation("entity", "update", "chatgptLeads", id, {
       returnChecked: true, operationalState: "doing", updatedAt: now
-    }), { silent: true }).then(function () { return true; });
+    });
+    return a.executeOperation(operation, { silent: true });
   }
   function submitQuestionAnswer(button) {
     var wrap = button.closest ? button.closest("[data-cg-question]") : null;

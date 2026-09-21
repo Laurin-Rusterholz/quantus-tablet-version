@@ -118,7 +118,13 @@ const bridge = {
     geschrieben.push(operation);
     const result = Core.applyOperation(payload, operation);
     if (result.applied) { payload = result.payload; bridge.state.payload = payload; }
-    return Promise.resolve(true);
+    // Review-Fix: die echte executeOperation() in app.js meldet einen
+    // abgelehnten Konflikt als false zurueck (Nicht uebernommen) — der
+    // vorherige Stub tat immer so, als sei alles uebernommen worden und
+    // verdeckte damit genau den Fehler, den die Mutation-vor-Operation
+    // verursachte (ein abgelehnter Versuch blieb trotzdem sichtbar
+    // "beantwortet"). Jetzt bildet der Stub das echte Ergebnis ab.
+    return Promise.resolve(Boolean(result.applied));
   }
 };
 const fensterlos = { __quantusTablet: bridge, __quantusTabletModules: [] };
@@ -287,6 +293,72 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
     ok(/Wartet auf: Antwort von Firma X/.test(inboxNachPruefung) && /Verantwortlich: Laurin/.test(inboxNachPruefung), "waitingOn/responsibleParty fehlen in der Anzeige");
     ok(/Status: <strong>Nachfrage geplant<\/strong>/.test(inboxNachPruefung), "operationalState 'followup_scheduled' fehlt in der Anzeige");
     ok(/Nächster Schritt: Angebot nachfassen/.test(inboxNachPruefung), "nextAction fehlt in der Anzeige");
+
+    // ═══ 8. KONFLIKT/RETRY: KEINE MUTATION VOR DER OPERATION ═══════════════
+    // Review-Fix: answerQuestion/markReturnChecked schrieben frueher answer/
+    // answeredAt/operationalState DIREKT auf das lebende Lead-Objekt, BEVOR
+    // die Operation lief — leads() kopiert nur das Array, nicht die Elemente,
+    // "existing" in applyEntityOperation IST dasselbe Objekt. Bei einer
+    // abgelehnten Operation (Konflikt) blieb der veraenderte Zustand trotzdem
+    // sichtbar stehen. Dieser Test simuliert genau das: ein "neuerer
+    // Fernstand" (hoehere updatedAt) lehnt die Operation ab — die Frage MUSS
+    // unbeantwortet bleiben, bis ein erfolgreicher zweiter Versuch (Retry)
+    // sie tatsaechlich beantwortet.
+    payload.entities.chatgptLeads.l9 = {
+      id: "l9", createdAt: "2026-09-05T08:00:00.000Z", updatedAt: "2099-01-01T00:00:00.000Z",
+      title: "Konflikttest", rawInput: "x", status: "wartet", readAt: JETZT,
+      interpretation: "x", research: "x", plan: "x", execution: "", result: "", assessment: {},
+      pendingQuestion: { text: "Konfliktfrage?", askedAt: JETZT }
+    };
+    bridge.state.payload = payload;
+
+    const geschriebenVorKonflikt = geschrieben.length;
+    const konfliktErgebnis = await CG.answerQuestion("l9", "Erster Versuch");
+    ok(konfliktErgebnis === false, "eine abgelehnte Operation (neuerer Fernstand) wurde als Erfolg gemeldet");
+    ok(geschrieben.length === geschriebenVorKonflikt + 1, "der abgelehnte Versuch wurde nicht aufgezeichnet");
+    ok(!payload.entities.chatgptLeads.l9.pendingQuestion.answeredAt,
+      "die Frage gilt trotz abgelehnter Operation als beantwortet — die alte Mutation-vor-Operation-Luecke ist zurueck");
+    ok(payload.entities.chatgptLeads.l9.operationalState === undefined, "operationalState wurde trotz abgelehnter Operation gesetzt");
+
+    // Retry: der Konflikt ist behoben (der "Fernstand" liegt nicht mehr in
+    // der Zukunft) — derselbe Aufruf muss jetzt tatsaechlich durchgehen.
+    payload.entities.chatgptLeads.l9.updatedAt = "2026-09-05T08:00:00.000Z";
+    const retryErgebnis = await CG.answerQuestion("l9", "Zweiter Versuch (Retry)");
+    ok(retryErgebnis === true, "der Retry nach behobenem Konflikt schlug fehl");
+    ok(payload.entities.chatgptLeads.l9.pendingQuestion.answeredAt && payload.entities.chatgptLeads.l9.pendingQuestion.answer === "Zweiter Versuch (Retry)",
+      "der Retry hat die Frage nicht tatsaechlich beantwortet");
+    ok(payload.entities.chatgptLeads.l9.operationalState === "doing", "der Retry hat operationalState nicht gesetzt");
+    ok(payload.entities.chatgptLeads.l9.questionForBriefingAt === null,
+      "eine beantwortete Frage muss questionForBriefingAt loeschen (einheitlich auf allen Clients)");
+    ok(/Antwort erhalten: Zweiter Versuch \(Retry\)/.test(payload.entities.chatgptLeads.l9.lastAction || ""),
+      "eine beantwortete Frage muss lastAction setzen (einheitlich auf allen Clients)");
+
+    // Ein bereits abgeschlossener Lead darf durch eine Antwort NICHT
+    // reaktiviert werden (Konsistenz mit Desktop/AI Sync).
+    payload.entities.chatgptLeads.l10 = {
+      id: "l10", createdAt: "2026-09-05T08:00:00.000Z", updatedAt: JETZT,
+      title: "Geschlossen mit offener Frage", rawInput: "x", status: "abgeschlossen", readAt: JETZT,
+      interpretation: "x", research: "x", plan: "x", execution: "", result: "", assessment: {},
+      pendingQuestion: { text: "Zu spät?", askedAt: JETZT }
+    };
+    bridge.state.payload = payload;
+    const geschriebenVorGeschlossen = geschrieben.length;
+    const geschlossenErgebnis = await CG.answerQuestion("l10", "Antwort auf Geschlossenes");
+    ok(geschlossenErgebnis === false, "eine Antwort auf einen abgeschlossenen Lead wurde angenommen");
+    ok(geschrieben.length === geschriebenVorGeschlossen, "eine Antwort auf einen abgeschlossenen Lead hat trotzdem geschrieben");
+    ok(!payload.entities.chatgptLeads.l10.pendingQuestion.answeredAt, "ein abgeschlossener Lead wurde durch eine Antwort reaktiviert (answeredAt gesetzt)");
+    ok(payload.entities.chatgptLeads.l10.status === "abgeschlossen", "ein abgeschlossener Lead wurde durch eine Antwort wieder geoeffnet");
+
+    payload.entities.chatgptLeads.l11 = {
+      id: "l11", createdAt: "2026-09-05T08:00:00.000Z", updatedAt: JETZT,
+      title: "Geschlossen mit Ruecklauf", rawInput: "x", status: "abgeschlossen", readAt: JETZT,
+      interpretation: "x", research: "x", plan: "x", execution: "", result: "", assessment: {},
+      assignee: "cowork", handoverAt: JETZT, returnedAt: JETZT, returnChecked: false
+    };
+    bridge.state.payload = payload;
+    const geschlossenRuecklauf = await CG.markReturnChecked("l11");
+    ok(geschlossenRuecklauf === false, "ein Ruecklauf auf einem abgeschlossenen Lead liess sich pruefen");
+    ok(payload.entities.chatgptLeads.l11.returnChecked === false, "ein abgeschlossener Lead wurde durch die Ruecklaufpruefung reaktiviert");
 
     // ═══ 4. VERDRAHTUNG ════════════════════════════════════════════════════
     ok(html.indexOf('<script src="chatgpt-app.js">') > 0 && html.indexOf('<script src="chatgpt-app.js">') < html.indexOf('<script src="app.js">'),
