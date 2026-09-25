@@ -422,10 +422,25 @@
     entity.files = files; await savePatch({ files }); renderOverlay();
   }
 
+  // Rueckgabewert (25.09.2026, Review-Fix): frueher wurde hier nichts
+  // Verwertbares zurueckgegeben (undefined im Erfolgsfall) — attachDocument()
+  // in chatgpt-app.js haengte deshalb ein blindes ".then(() => true)" an
+  // uploadTo() und meldete IMMER Erfolg, selbst wenn jede einzelne Datei
+  // fehlschlug (nur als Toast sichtbar, nie im Rueckgabewert). Jetzt liefert
+  // diese Funktion ehrlich zurueck, ob WIRKLICH mindestens eine angeforderte
+  // Datei durchkam UND keine einzige fehlschlug — attachDocument()/uploadTo()
+  // reichen das unveraendert durch (uploadFilesTo() beruehrt den Rueckgabewert
+  // nicht, .finally() laesst ihn unangetastet).
   async function uploadFiles(fileList) {
-    const q = api(), entity = currentEntity(), storage = q?.getStorage?.(); if (!q || !entity || !storage) return q?.toast("Upload nicht verfügbar", "Firebase Storage konnte nicht geladen werden", "error");
-    const collection = ui.collection, entityId = entity.id, config = COLLECTIONS[collection], files = asArray(entity.files).slice();
-    for (const file of Array.from(fileList || [])) {
+    const q = api(), entity = currentEntity(), storage = q?.getStorage?.();
+    if (!q || !entity || !storage) { q?.toast("Upload nicht verfügbar", "Firebase Storage konnte nicht geladen werden", "error"); return false; }
+    // Fallback fuer Aufrufer ausserhalb der eigenen COLLECTIONS-Liste (z. B.
+    // chatgptLeads ueber uploadTo) — die Upload-Logik selbst bleibt unveraendert,
+    // nur der Namensraum im Storage-Pfad braucht einen Wert.
+    const collection = ui.collection, entityId = entity.id, config = COLLECTIONS[collection] || { kind: collection }, files = asArray(entity.files).slice();
+    const angefordert = Array.from(fileList || []);
+    let erfolgreich = 0;
+    for (const file of angefordert) {
       if (file.size > 50 * 1024 * 1024) { q.toast("Datei zu gross", `${file.name} überschreitet 50 MB`, "error"); continue; }
       try {
         const fileId = makeId("f"), safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
@@ -437,11 +452,13 @@
         }, reject, resolve));
         const url = await task.snapshot.ref.getDownloadURL();
         files.push({ id: fileId, name: file.name, originalName: file.name, size: file.size, type: file.type, storagePath, url, uploadedAt: new Date().toISOString() });
+        erfolgreich++;
       } catch (error) {
         q.toast("Upload fehlgeschlagen", `${file.name}: ${error.message || "Unbekannter Fehler"}`, "error");
       }
     }
     entity.files = files; await savePatch({ files }); renderOverlay();
+    return angefordert.length > 0 && erfolgreich === angefordert.length;
   }
 
   function formatBytes(bytes) {
@@ -457,6 +474,17 @@
   }
 
   function mountRoute() {}
+
+  // Fuer andere Module (z. B. chatgpt-app.js, Dokument-Anhang am Lead): die
+  // bestehende uploadFiles() unveraendert nutzen, nur kurz auf die gewuenschte
+  // Sammlung/Entitaet zeigen und danach den eigenen Arbeitsflaechen-Stand
+  // wiederherstellen — ein offen stehendes Tablet Canvas bekommt davon nichts
+  // zu sehen.
+  function uploadFilesTo(collection, entityId, fileList) {
+    const prevCollection = ui.collection, prevEntityId = ui.entityId;
+    ui.collection = collection; ui.entityId = entityId;
+    return Promise.resolve(uploadFiles(fileList)).finally(() => { ui.collection = prevCollection; ui.entityId = prevEntityId; });
+  }
 
   function open(tab) {
     if (tab) ui.tab = tab;
@@ -580,5 +608,5 @@
     drag = null; renderOverlay();
   });
 
-  window.QuantusTabletWorkspace = { open, close, renderRoute, mountRoute, refresh: renderOverlay };
+  window.QuantusTabletWorkspace = { open, close, renderRoute, mountRoute, refresh: renderOverlay, uploadTo: uploadFilesTo };
 })();

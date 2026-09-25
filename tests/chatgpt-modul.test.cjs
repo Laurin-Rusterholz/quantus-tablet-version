@@ -51,10 +51,44 @@ function datenstand() {
               assessment: { menge: "cowork", werkzeug: "cowork", kontext: "chatgpt", quantusNaehe: "chatgpt", recherche: "cowork", zuschnitt: "cowork" },
               assignee: "cowork", assignmentReason: "Viel Text, klar abgegrenzt.", handoverPacket: "Paket: Firma X anlegen.",
               grantedPermissions: { websuche: true, dateienErstellen: { erlaubt: true, formate: ["pdf"] }, externeTools: [], verboten: ["Mails senden"] },
-              handoverAt: JETZT, linkedOrganizations: ["o1"] }
+              handoverAt: JETZT, linkedOrganizations: ["o1"] },
+        // Neue, rein additive Felder (Tagesbriefing-Gesamtkonzept-v2): eine
+        // offene Rueckfrage, die auf dem Tablet einmalig beantwortbar sein soll.
+        l2: { id: "l2", createdAt: "2026-09-02T08:00:00.000Z", updatedAt: JETZT, title: "Format fuer den Bericht", rawInput: "In welchem Format?",
+              status: "wartet", readAt: JETZT, interpretation: "x", research: "x", plan: "x", execution: "", result: "",
+              assessment: {}, operationalState: "decision_required",
+              pendingQuestion: { text: "PDF oder Word?", options: ["PDF", "Word"], recommendation: "PDF", askedAt: JETZT } },
+        // Eine bereits beantwortete Rueckfrage — muss reine Anzeige bleiben.
+        l3: { id: "l3", createdAt: "2026-09-02T09:00:00.000Z", updatedAt: JETZT, title: "Bereits geklaerte Rueckfrage", rawInput: "x",
+              status: "wartet", readAt: JETZT, interpretation: "x", research: "x", plan: "x", execution: "", result: "",
+              assessment: {}, pendingQuestion: { text: "Alte Frage", askedAt: "2026-08-01T00:00:00.000Z", answer: "Ja, bitte", answeredAt: "2026-08-02T00:00:00.000Z" } },
+        // Ein Cowork-Paket, das zurueckgekommen, aber noch nicht geprueft ist.
+        l4: { id: "l4", createdAt: "2026-09-02T10:00:00.000Z", updatedAt: JETZT, title: "Cowork-Paket zurueck", rawInput: "x",
+              status: "wartet", readAt: JETZT, interpretation: "x", research: "x", plan: "x", execution: "", result: "",
+              assessment: {}, assignee: "cowork", assignmentReason: "x", grantedPermissions: {},
+              handoverAt: "2026-09-02T08:00:00.000Z", expectedReturnAt: "2026-09-03T08:00:00.000Z",
+              returnedAt: "2026-09-03T09:00:00.000Z", returnChecked: false },
+        // Ein bereits geprueftes Paket — der Knopf darf hier nicht mehr stehen.
+        l5: { id: "l5", createdAt: "2026-09-02T11:00:00.000Z", updatedAt: JETZT, title: "Bereits geprueftes Paket", rawInput: "x",
+              status: "wartet", readAt: JETZT, interpretation: "x", research: "x", plan: "x", execution: "", result: "",
+              assessment: {}, assignee: "cowork", handoverAt: JETZT, returnedAt: JETZT, returnChecked: true },
+        // Wartet auf extern — Anzeige von waitingOn/followUpAt/responsibleParty.
+        l6: { id: "l6", createdAt: "2026-09-02T12:00:00.000Z", updatedAt: JETZT, title: "Wartet auf Rueckmeldung", rawInput: "x",
+              status: "wartet", readAt: JETZT, interpretation: "x", research: "x", plan: "x", execution: "", result: "",
+              assessment: {}, operationalState: "waiting_external", waitingOn: "Antwort von Firma X",
+              waitingSince: "2026-09-01T00:00:00.000Z", followUpAt: "2026-09-05T00:00:00.000Z", responsibleParty: "Laurin" },
+        // Naechster Schritt geplant — Anzeige von nextAction/nextActionAt.
+        l7: { id: "l7", createdAt: "2026-09-02T13:00:00.000Z", updatedAt: JETZT, title: "Angebot nachfassen", rawInput: "x",
+              status: "wartet", readAt: JETZT, interpretation: "x", research: "x", plan: "x", execution: "", result: "",
+              assessment: {}, operationalState: "followup_scheduled", nextAction: "Angebot nachfassen", nextActionAt: "2026-09-10T09:00:00.000Z" }
       },
       chatgptTasks: {
         t1: { id: "t1", createdAt: JETZT, updatedAt: JETZT, text: "Adresse nachtragen", state: "offen", anchorKind: "organization", anchorId: "o1", anchorLabel: "Firma X AG", createdBy: "laurin" }
+      },
+      // Fuer die Delegation (Master-PDF-Ausnahme, Abschnitt 9): eine
+      // gewoehnliche Aufgabe ohne bisherige Delegation.
+      tasks: {
+        tk1: { id: "tk1", createdAt: JETZT, updatedAt: JETZT, title: "Rückruf bei Firma X", assignee: "user" }
       }
     },
     chatgptNotesMeta: { lastSessionReadAt: GELESEN }
@@ -89,7 +123,13 @@ const bridge = {
     geschrieben.push(operation);
     const result = Core.applyOperation(payload, operation);
     if (result.applied) { payload = result.payload; bridge.state.payload = payload; }
-    return Promise.resolve(true);
+    // Review-Fix: die echte executeOperation() in app.js meldet einen
+    // abgelehnten Konflikt als false zurueck (Nicht uebernommen) — der
+    // vorherige Stub tat immer so, als sei alles uebernommen worden und
+    // verdeckte damit genau den Fehler, den die Mutation-vor-Operation
+    // verursachte (ein abgelehnter Versuch blieb trotzdem sichtbar
+    // "beantwortet"). Jetzt bildet der Stub das echte Ergebnis ab.
+    return Promise.resolve(Boolean(result.applied));
   }
 };
 const fensterlos = { __quantusTablet: bridge, __quantusTabletModules: [] };
@@ -118,6 +158,9 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
 }
 
 // ═══ 2. LEADS: EINGANG UND DETAIL, ALLES SICHTBAR, NICHTS BEARBEITBAR ═════
+// (mit genau zwei schmalen Ausnahmen — Rueckfrage beantworten, Ruecklauf
+// pruefen — die Abschnitt 5/6 unten einzeln absichern; hier bleibt der Lead
+// l1 ohne diese Felder die Referenz fuer "nichts davon".)
 {
   modul.onAction("cg-tab", { dataset: { tab: "leads" } });
   const inbox = modul.render("chatgptnotes");
@@ -128,7 +171,10 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
   ok(/Viel Text, klar abgegrenzt\./.test(inbox), "die Begruendung der Zuweisung fehlt auf der Karte");
   ok(/Websuche ✓ · Dateien ✓ \(pdf\) · Tools: keine · Verboten: Mails senden/.test(inbox), "die erteilten Berechtigungen stehen nicht ohne Klick auf der Karte");
   ok(/<details class="cg-packet">[\s\S]*Paket: Firma X anlegen\./.test(inbox), "das Uebergabepaket ist nicht (eingeklappt) lesbar");
-  ok(!/<textarea|data-action="cgl-close"|abschliessen|<select/i.test(inbox), "der Tablet-Eingang bietet Bearbeiten oder Abschliessen an");
+  ok(!/data-action="cgl-close"|abschliessen|<select/i.test(inbox), "der Tablet-Eingang bietet Abschliessen oder eine Statusauswahl an");
+  // Einziges erlaubtes Textfeld ist die Rueckfrage-Antwort (Abschnitt 5); jedes
+  // andere Textfeld waere freies Editieren und ist nicht vorgesehen.
+  ok(!/<textarea(?!\s+data-action="cg-question-input")/.test(inbox), "der Tablet-Eingang enthaelt ein Textfeld ausserhalb der Rueckfrage-Antwort");
   ok(CG.unreadLeadsCount() === 1, "der Zaehler ungelesener Leads stimmt nicht");
 
   modul.onAction("cg-lead-open", { dataset: { id: "l1" } });
@@ -140,7 +186,13 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
   ok(reihenfolge.every((pos, i) => i === 0 || pos > reihenfolge[i - 1]), "die Schritte stehen nicht in der festen Reihenfolge untereinander");
   ok(/organizations: Firma X AG/.test(detail), "die Verknuepfung zur Organisation wird nicht aufgeloest");
   ok(/data-action="cg-lead-back"/.test(detail), "es gibt keinen Weg zurueck in den Eingang");
-  ok(!/<textarea|<input|data-form=/.test(detail), "das Lead-Detail auf dem Tablet enthaelt Eingabefelder");
+  // Master-PDF-Ausnahme (Tagesbriefing-Gesamtkonzept-v2): genau EIN Eingabefeld
+  // ist im Lead-Detail erlaubt — der Datei-Upload fuer den Dokument-Anhang.
+  // Alles andere (freies Editieren) bleibt verboten.
+  ok(!/<textarea|<input(?!\s+data-action="cg-lead-upload-input")|data-form=/.test(detail),
+    "das Lead-Detail auf dem Tablet enthaelt Eingabefelder ausserhalb des Dokument-Anhangs");
+  ok(/data-action="cg-lead-upload-input"[^>]*type="file"[^>]*data-id="l1"/.test(detail), "der Dokument-Anhang fehlt im Lead-Detail oder traegt nicht die richtige Lead-Id");
+  ok(/Keine Anhänge\./.test(detail), "ein Lead ohne Dateien zeigt keinen ehrlichen Platzhalter fuer Anhaenge");
 }
 
 // ═══ 3. CHATGPT-AUFGABEN: MARKER AM ELEMENT, ANLEGEN NUR MIT ANKER ════════
@@ -172,6 +224,286 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
     ok(CG.openTasksCount() === 2, "der Zaehler offener Aufgaben stimmt nicht");
     ok(/🪶 2/.test(CG.marker("organizations", "o1")), "der Marker zaehlt die neue Aufgabe nicht mit");
 
+    // ═══ 5. RUECKFRAGE: EINMALIG BEANTWORTBAR, AUF DEMSELBEN LEAD ═══════════
+    // (Tagesbriefing-Gesamtkonzept-v2, "compact parity" — die einzige der
+    // zwei erlaubten Schreib-Ausnahmen, die eine Texteingabe braucht.)
+    modul.onAction("cg-lead-back", {});
+    const inboxMitFrage = modul.render("chatgptnotes");
+    ok(/PDF oder Word\?/.test(inboxMitFrage), "die offene Rueckfrage fehlt auf der Karte");
+    ok(/data-action="cg-question-input"/.test(inboxMitFrage) && /data-action="cg-question-submit"[^>]*data-id="l2"/.test(inboxMitFrage),
+      "das Antwortfeld fuer die offene Rueckfrage fehlt oder traegt nicht die richtige Lead-Id");
+    ok(/PDF<\/span>/.test(inboxMitFrage) && /Word<\/span>/.test(inboxMitFrage), "die Antwortoptionen der Rueckfrage fehlen");
+    ok(/Empfehlung: PDF/.test(inboxMitFrage), "die Empfehlung der Rueckfrage fehlt");
+    ok(/Rückfrage beantwortet/.test(inboxMitFrage) && /Ja, bitte/.test(inboxMitFrage), "eine bereits beantwortete Rueckfrage (l3) wird nicht als erledigt angezeigt");
+    // l3 ist beantwortet — dafuer darf KEIN Antwortfeld mehr auf ihrer Karte stehen.
+    ok(!/data-action="cg-question-submit"[^>]*data-id="l3"/.test(inboxMitFrage), "eine bereits beantwortete Rueckfrage bietet trotzdem ein Antwortfeld an");
+
+    const leadsVorAntwort = Object.keys(payload.entities.chatgptLeads).length;
+    const geschriebenVorAntwort = geschrieben.length;
+
+    ok((await CG.answerQuestion("l2", "   ")) === false, "eine leere Antwort wurde als Erfolg gemeldet");
+    ok(geschrieben.length === geschriebenVorAntwort, "eine leere Antwort hat trotzdem geschrieben");
+    ok((await CG.answerQuestion("l1", "Egal")) === false, "eine Antwort auf einen Lead ohne Rueckfrage wurde angenommen");
+    ok(geschrieben.length === geschriebenVorAntwort, "eine Antwort ohne pendingQuestion hat trotzdem geschrieben");
+
+    const beantwortet = await CG.answerQuestion("l2", "PDF bitte");
+    ok(beantwortet === true, "die gueltige Antwort wurde nicht angenommen");
+    ok(geschrieben.length === geschriebenVorAntwort + 1, "die Antwort wurde nicht als Operation geschrieben");
+    const antwortOp = geschrieben[geschrieben.length - 1];
+    ok(antwortOp && antwortOp.kind === "entity" && antwortOp.action === "update" && antwortOp.collection === "chatgptLeads" && antwortOp.id === "l2",
+      `die Antwort geht nicht als Update-Operation auf denselben Lead: ${JSON.stringify(antwortOp && { kind: antwortOp.kind, action: antwortOp.action, collection: antwortOp.collection, id: antwortOp.id })}`);
+    ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorAntwort, "die Antwort hat einen zweiten Lead angelegt statt denselben zu aendern");
+    const l2Danach = payload.entities.chatgptLeads.l2;
+    ok(l2Danach.pendingQuestion.answer === "PDF bitte" && Boolean(l2Danach.pendingQuestion.answeredAt), "die Antwort steht nicht im Datenstand");
+    ok(l2Danach.operationalState === "doing", "der Status wechselt nach der Antwort nicht auf 'doing'");
+    ok(l2Danach.pendingQuestion.text === "PDF oder Word?" && l2Danach.pendingQuestion.recommendation === "PDF", "die Antwort hat Frage/Empfehlung der Rueckfrage ueberschrieben");
+
+    // Ein zweites Mal beantworten darf nichts mehr tun — die Sperre ist answeredAt.
+    const zweiterVersuch = await CG.answerQuestion("l2", "Word doch");
+    ok(zweiterVersuch === false, "eine bereits beantwortete Rueckfrage liess sich ein zweites Mal beantworten");
+    ok(geschrieben.length === geschriebenVorAntwort + 1, "die zweite Antwort hat trotzdem geschrieben");
+    ok(payload.entities.chatgptLeads.l2.pendingQuestion.answer === "PDF bitte", "die zweite Antwort hat die erste ueberschrieben");
+
+    modul.onAction("cg-tab", { dataset: { tab: "leads" } });
+    const inboxNachAntwort = modul.render("chatgptnotes");
+    ok(!/data-action="cg-question-submit"[^>]*data-id="l2"/.test(inboxNachAntwort), "die beantwortete Rueckfrage bietet weiterhin ein Antwortfeld an");
+    ok(/Rückfrage beantwortet/.test(inboxNachAntwort) && /PDF bitte/.test(inboxNachAntwort), "die beantwortete Rueckfrage zeigt die Antwort nicht an");
+
+    // ═══ 6. COWORK-RUECKLAUF: KNOPF NUR IM RICHTIGEN ZUSTAND ════════════════
+    ok(/data-action="cg-return-checked"[^>]*data-id="l4"/.test(inboxNachAntwort), "der Knopf 'Rücklauf geprüft' fehlt beim zurueckgekommenen, ungeprueften Paket");
+    ok(!/data-action="cg-return-checked"[^>]*data-id="l5"/.test(inboxNachAntwort), "ein bereits geprueftes Paket zeigt den Knopf trotzdem");
+    ok(!/data-action="cg-return-checked"[^>]*data-id="l1"/.test(inboxNachAntwort), "ein Lead ohne Ruecklauf zeigt den Knopf trotzdem");
+    ok(/· ungeprüft/.test(inboxNachAntwort), "das zurueckgekommene, ungeprüfte Paket (l4) zeigt seinen Zustand nicht ehrlich an");
+    ok(/· geprüft/.test(inboxNachAntwort), "das bereits geprüfte Paket (l5) zeigt seinen Zustand nicht an");
+
+    const geschriebenVorRuecklauf = geschrieben.length;
+    ok((await CG.markReturnChecked("l1")) === false, "ein Lead ohne Ruecklauf liess sich als geprueft markieren");
+    ok((await CG.markReturnChecked("l5")) === false, "ein bereits geprueftes Paket liess sich erneut markieren");
+    ok(geschrieben.length === geschriebenVorRuecklauf, "eine ungueltige Pruefung hat trotzdem geschrieben");
+
+    const geprueft = await CG.markReturnChecked("l4");
+    ok(geprueft === true, "die gueltige Pruefung wurde nicht angenommen");
+    ok(geschrieben.length === geschriebenVorRuecklauf + 1, "die Pruefung wurde nicht als Operation geschrieben");
+    const ruecklaufOp = geschrieben[geschrieben.length - 1];
+    ok(ruecklaufOp && ruecklaufOp.kind === "entity" && ruecklaufOp.action === "update" && ruecklaufOp.collection === "chatgptLeads" && ruecklaufOp.id === "l4" && ruecklaufOp.patch.returnChecked === true,
+      `die Pruefung geht nicht als Update-Operation auf denselben Lead: ${JSON.stringify(ruecklaufOp && { kind: ruecklaufOp.kind, action: ruecklaufOp.action, collection: ruecklaufOp.collection, id: ruecklaufOp.id, patch: ruecklaufOp.patch })}`);
+    ok(payload.entities.chatgptLeads.l4.returnChecked === true && payload.entities.chatgptLeads.l4.operationalState === "doing", "der Datenstand zeigt die Pruefung nicht");
+    ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorAntwort, "die Pruefung hat einen zweiten Lead angelegt statt denselben zu aendern");
+
+    // Ein zweites Mal pruefen darf nichts mehr tun.
+    const zweiteRuecklaufPruefung = await CG.markReturnChecked("l4");
+    ok(zweiteRuecklaufPruefung === false, "ein bereits geprueftes Paket liess sich ein zweites Mal pruefen");
+    ok(geschrieben.length === geschriebenVorRuecklauf + 1, "die zweite Pruefung hat trotzdem geschrieben");
+
+    const inboxNachPruefung = modul.render("chatgptnotes");
+    ok(!/data-action="cg-return-checked"[^>]*data-id="l4"/.test(inboxNachPruefung), "der Knopf steht nach der Pruefung immer noch auf der Karte");
+
+    // ═══ 7. ANZEIGE: STATUS/NAECHSTER SCHRITT/WARTET AUF — EHRLICH ══════════
+    ok(/Status: <strong>nicht gesetzt<\/strong>/.test(inboxNachPruefung), "ein Lead ohne operationalState zeigt keinen ehrlichen Platzhalter");
+    ok(/Status: <strong>Wartet extern<\/strong>/.test(inboxNachPruefung), "operationalState wird nicht als deutsches Label angezeigt");
+    ok(/Wartet auf: Antwort von Firma X/.test(inboxNachPruefung) && /Verantwortlich: Laurin/.test(inboxNachPruefung), "waitingOn/responsibleParty fehlen in der Anzeige");
+    ok(/Status: <strong>Follow-up terminiert<\/strong>/.test(inboxNachPruefung), "operationalState 'followup_scheduled' fehlt in der Anzeige");
+    ok(/Nächster Schritt: Angebot nachfassen/.test(inboxNachPruefung), "nextAction fehlt in der Anzeige");
+
+    // ═══ 8. KONFLIKT/RETRY: KEINE MUTATION VOR DER OPERATION ═══════════════
+    // Review-Fix: answerQuestion/markReturnChecked schrieben frueher answer/
+    // answeredAt/operationalState DIREKT auf das lebende Lead-Objekt, BEVOR
+    // die Operation lief — leads() kopiert nur das Array, nicht die Elemente,
+    // "existing" in applyEntityOperation IST dasselbe Objekt. Bei einer
+    // abgelehnten Operation (Konflikt) blieb der veraenderte Zustand trotzdem
+    // sichtbar stehen. Dieser Test simuliert genau das: ein "neuerer
+    // Fernstand" (hoehere updatedAt) lehnt die Operation ab — die Frage MUSS
+    // unbeantwortet bleiben, bis ein erfolgreicher zweiter Versuch (Retry)
+    // sie tatsaechlich beantwortet.
+    payload.entities.chatgptLeads.l9 = {
+      id: "l9", createdAt: "2026-09-05T08:00:00.000Z", updatedAt: "2099-01-01T00:00:00.000Z",
+      title: "Konflikttest", rawInput: "x", status: "wartet", readAt: JETZT,
+      interpretation: "x", research: "x", plan: "x", execution: "", result: "", assessment: {},
+      pendingQuestion: { text: "Konfliktfrage?", askedAt: JETZT }
+    };
+    bridge.state.payload = payload;
+
+    const geschriebenVorKonflikt = geschrieben.length;
+    const konfliktErgebnis = await CG.answerQuestion("l9", "Erster Versuch");
+    ok(konfliktErgebnis === false, "eine abgelehnte Operation (neuerer Fernstand) wurde als Erfolg gemeldet");
+    ok(geschrieben.length === geschriebenVorKonflikt + 1, "der abgelehnte Versuch wurde nicht aufgezeichnet");
+    ok(!payload.entities.chatgptLeads.l9.pendingQuestion.answeredAt,
+      "die Frage gilt trotz abgelehnter Operation als beantwortet — die alte Mutation-vor-Operation-Luecke ist zurueck");
+    ok(payload.entities.chatgptLeads.l9.operationalState === undefined, "operationalState wurde trotz abgelehnter Operation gesetzt");
+
+    // Retry: der Konflikt ist behoben (der "Fernstand" liegt nicht mehr in
+    // der Zukunft) — derselbe Aufruf muss jetzt tatsaechlich durchgehen.
+    payload.entities.chatgptLeads.l9.updatedAt = "2026-09-05T08:00:00.000Z";
+    const retryErgebnis = await CG.answerQuestion("l9", "Zweiter Versuch (Retry)");
+    ok(retryErgebnis === true, "der Retry nach behobenem Konflikt schlug fehl");
+    ok(payload.entities.chatgptLeads.l9.pendingQuestion.answeredAt && payload.entities.chatgptLeads.l9.pendingQuestion.answer === "Zweiter Versuch (Retry)",
+      "der Retry hat die Frage nicht tatsaechlich beantwortet");
+    ok(payload.entities.chatgptLeads.l9.operationalState === "doing", "der Retry hat operationalState nicht gesetzt");
+    ok(payload.entities.chatgptLeads.l9.questionForBriefingAt === null,
+      "eine beantwortete Frage muss questionForBriefingAt loeschen (einheitlich auf allen Clients)");
+    ok(/Antwort erhalten: Zweiter Versuch \(Retry\)/.test(payload.entities.chatgptLeads.l9.lastAction || ""),
+      "eine beantwortete Frage muss lastAction setzen (einheitlich auf allen Clients)");
+
+    // Ein bereits abgeschlossener Lead darf durch eine Antwort NICHT
+    // reaktiviert werden (Konsistenz mit Desktop/AI Sync).
+    payload.entities.chatgptLeads.l10 = {
+      id: "l10", createdAt: "2026-09-05T08:00:00.000Z", updatedAt: JETZT,
+      title: "Geschlossen mit offener Frage", rawInput: "x", status: "abgeschlossen", readAt: JETZT,
+      interpretation: "x", research: "x", plan: "x", execution: "", result: "", assessment: {},
+      pendingQuestion: { text: "Zu spät?", askedAt: JETZT }
+    };
+    bridge.state.payload = payload;
+    const geschriebenVorGeschlossen = geschrieben.length;
+    const geschlossenErgebnis = await CG.answerQuestion("l10", "Antwort auf Geschlossenes");
+    ok(geschlossenErgebnis === false, "eine Antwort auf einen abgeschlossenen Lead wurde angenommen");
+    ok(geschrieben.length === geschriebenVorGeschlossen, "eine Antwort auf einen abgeschlossenen Lead hat trotzdem geschrieben");
+    ok(!payload.entities.chatgptLeads.l10.pendingQuestion.answeredAt, "ein abgeschlossener Lead wurde durch eine Antwort reaktiviert (answeredAt gesetzt)");
+    ok(payload.entities.chatgptLeads.l10.status === "abgeschlossen", "ein abgeschlossener Lead wurde durch eine Antwort wieder geoeffnet");
+
+    payload.entities.chatgptLeads.l11 = {
+      id: "l11", createdAt: "2026-09-05T08:00:00.000Z", updatedAt: JETZT,
+      title: "Geschlossen mit Ruecklauf", rawInput: "x", status: "abgeschlossen", readAt: JETZT,
+      interpretation: "x", research: "x", plan: "x", execution: "", result: "", assessment: {},
+      assignee: "cowork", handoverAt: JETZT, returnedAt: JETZT, returnChecked: false
+    };
+    bridge.state.payload = payload;
+    const geschlossenRuecklauf = await CG.markReturnChecked("l11");
+    ok(geschlossenRuecklauf === false, "ein Ruecklauf auf einem abgeschlossenen Lead liess sich pruefen");
+    ok(payload.entities.chatgptLeads.l11.returnChecked === false, "ein abgeschlossener Lead wurde durch die Ruecklaufpruefung reaktiviert");
+
+    // ═══ 9. DELEGATION: AUFGABE → CHATGPT (Master-PDF-Ausnahme) ═════════════
+    // App-Besitzer-Vorgabe: Delegation ist auf dem Tablet compact vorhanden.
+    // Spiegelt AI Sync (Desktop) case "task-delegate-chatgpt": genau EIN Lead
+    // pro Aufgabe, Reaktivierung statt Duplikat, zwei getrennte Operationen.
+    {
+      const leadsVorDelegation = Object.keys(payload.entities.chatgptLeads).length;
+      const geschriebenVorDelegation = geschrieben.length;
+
+      const delegiert = await CG.delegateTask("tk1");
+      ok(delegiert === true, "die Delegation einer Aufgabe an ChatGPT schlug fehl");
+      ok(geschrieben.length === geschriebenVorDelegation + 2,
+        `die Delegation schreibt nicht genau zwei Operationen (Lead + Aufgabe): ${geschrieben.length - geschriebenVorDelegation}`);
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorDelegation + 1, "die Delegation hat nicht genau einen neuen Lead angelegt");
+      const tkNachDelegation = payload.entities.tasks.tk1;
+      ok(tkNachDelegation.assignee === "chatgpt", "die Aufgabe zeigt nach der Delegation nicht auf ChatGPT");
+      ok(Boolean(tkNachDelegation.delegatedLeadId), "die Aufgabe traegt keine delegatedLeadId");
+      const leadId1 = tkNachDelegation.delegatedLeadId;
+      const lead1 = payload.entities.chatgptLeads[leadId1];
+      ok(Boolean(lead1), "der verknuepfte Lead existiert nicht im Datenstand");
+      ok(lead1.operationalState === "doing", "der neue Lead traegt operationalState 'doing' nicht");
+      ok(lead1.title === "Rückruf bei Firma X" && lead1.rawInput === "Delegierte Aufgabe: Rückruf bei Firma X",
+        `der neue Lead traegt Titel/Wortlaut der Aufgabe nicht: ${JSON.stringify({ title: lead1.title, rawInput: lead1.rawInput })}`);
+
+      // Zurueckholen: Aufgabe zurueck an "user", der Lead bleibt bestehen
+      // (Historie), wird aber als hinfaellig geschlossen — kein zweiter,
+      // verwaister Lead beim naechsten Delegieren.
+      const geschriebenVorZurueckholen = geschrieben.length;
+      const zurueckgeholt = await CG.delegateTask("tk1");
+      ok(zurueckgeholt === true, "das Zurueckholen einer delegierten Aufgabe schlug fehl");
+      ok(geschrieben.length === geschriebenVorZurueckholen + 2, "das Zurueckholen schreibt nicht genau zwei Operationen (Lead + Aufgabe)");
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorDelegation + 1, "das Zurueckholen hat einen zusaetzlichen Lead angelegt");
+      ok(payload.entities.tasks.tk1.assignee === "user", "die Aufgabe zeigt nach dem Zurueckholen weiterhin auf ChatGPT");
+      ok(payload.entities.chatgptLeads[leadId1].status === "abgeschlossen" && payload.entities.chatgptLeads[leadId1].operationalState === "cancelled",
+        "der zurueckgeholte Lead wird nicht als hinfaellig geschlossen markiert");
+      ok(payload.entities.chatgptLeads[leadId1].obsoleteReason === "Aufgabe wieder zurückgeholt", "der Grund fuer die Schliessung fehlt");
+
+      // Erneutes Delegieren: GENAU DERSELBE Lead wird reaktiviert (Idempotenz)
+      // — beliebig viele Wechsel duerfen nie einen zweiten Lead fuer dieselbe
+      // Aufgabe anlegen.
+      const wiederDelegiert = await CG.delegateTask("tk1");
+      ok(wiederDelegiert === true, "das erneute Delegieren derselben Aufgabe schlug fehl");
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorDelegation + 1,
+        "das erneute Delegieren hat einen zweiten Lead angelegt statt denselben wiederzuverwenden");
+      ok(payload.entities.tasks.tk1.assignee === "chatgpt" && payload.entities.tasks.tk1.delegatedLeadId === leadId1,
+        "das erneute Delegieren zeigt nicht wieder auf denselben Lead");
+      ok(payload.entities.chatgptLeads[leadId1].status === "neu" && payload.entities.chatgptLeads[leadId1].operationalState === "doing",
+        "der reaktivierte Lead ist nicht wieder aktiv (status/operationalState)");
+      ok(payload.entities.chatgptLeads[leadId1].closedAt === null && payload.entities.chatgptLeads[leadId1].closedBy === null,
+        "der reaktivierte Lead traegt noch die alten Schliessungsfelder");
+
+      // Eine nicht existierende Aufgabe darf nichts schreiben.
+      const geschriebenVorFehlschlag = geschrieben.length;
+      ok((await CG.delegateTask("gibt-es-nicht")) === false, "die Delegation einer nicht existierenden Aufgabe wurde als Erfolg gemeldet");
+      ok(geschrieben.length === geschriebenVorFehlschlag, "die Delegation einer nicht existierenden Aufgabe hat trotzdem geschrieben");
+    }
+
+    // ═══ 10. INTAKE: ANFRAGE EINREICHEN (Master-PDF-Ausnahme) ═══════════════
+    {
+      modul.onAction("cg-lead-back", {});
+      modul.onAction("cg-tab", { dataset: { tab: "notes" } });
+      const notesMitIntake = modul.render("chatgptnotes");
+      ok(/data-action="cg-intake-input"/.test(notesMitIntake) && /data-action="cg-intake-submit"/.test(notesMitIntake),
+        "das Intake-Feld fehlt auf dem Hauptbildschirm (Notes)");
+
+      const leadsVorIntake = Object.keys(payload.entities.chatgptLeads).length;
+      const geschriebenVorIntake = geschrieben.length;
+      ok((await CG.addChatgptLead("", "   ")) === null, "eine leere Anfrage wurde als Lead angelegt");
+      ok(geschrieben.length === geschriebenVorIntake, "eine leere Anfrage hat trotzdem geschrieben");
+
+      const neueLeadId = await CG.addChatgptLead("", "Bitte Rechnung Nr. 4711 pruefen\nDetails folgen per Mail.");
+      ok(Boolean(neueLeadId), "die Anfrage wurde nicht als Lead angelegt");
+      ok(geschrieben.length === geschriebenVorIntake + 1, "die Anfrage wurde nicht als genau eine Operation geschrieben");
+      ok(Object.keys(payload.entities.chatgptLeads).length === leadsVorIntake + 1, "die Anfrage hat nicht genau einen Lead angelegt");
+      const neuerLead = payload.entities.chatgptLeads[neueLeadId];
+      ok(neuerLead.title === "Bitte Rechnung Nr. 4711 pruefen", "der Titel des neuen Leads kommt nicht aus der ersten Zeile der Anfrage");
+      ok(neuerLead.rawInput === "Bitte Rechnung Nr. 4711 pruefen\nDetails folgen per Mail.", "der volle Wortlaut der Anfrage fehlt im Lead");
+      ok(neuerLead.status === "neu" && neuerLead.assessment && neuerLead.assessment.menge === null,
+        "der neue Lead traegt nicht die Standardform (Status/Assessment)");
+    }
+
+    // ═══ 11. DOKUMENT-ANHANG: BESTEHENDER ~50MB-UPLOAD, UNVERAENDERT ════════
+    {
+      modul.onAction("cg-lead-open", { dataset: { id: "l1" } });
+
+      // Ohne window.QuantusTabletWorkspace darf nichts passieren (Modulgrenze,
+      // CLAUDE.md Fallstrick 1) — kein Fehler, kein stiller Erfolg.
+      const geschriebenOhneWorkspace = geschrieben.length;
+      ok((await CG.attachDocument("l1", [{ name: "a.pdf", size: 100 }])) === false, "ein Anhang ohne Tablet Canvas wurde als Erfolg gemeldet");
+      ok(geschrieben.length === geschriebenOhneWorkspace, "ein Anhang ohne Tablet Canvas hat trotzdem geschrieben");
+      ok((await CG.attachDocument("l1", [])) === false, "ein Anhang ohne ausgewaehlte Datei wurde als Erfolg gemeldet");
+
+      // Mit Workspace: der bestehende Upload wird unveraendert aufgerufen —
+      // genau die Sammlung/Id des geoeffneten Leads, keine eigene Upload-
+      // Logik hier in chatgpt-app.js.
+      const aufrufe = [];
+      fensterlos.QuantusTabletWorkspace = {
+        uploadTo(collection, entityId, fileList) {
+          aufrufe.push({ collection, entityId, fileList });
+          // Simuliert das echte Verhalten von tablet-workspace.js: ein
+          // "update" auf genau diesem Lead haengt die Datei an — derselbe
+          // Schreibweg (executeOperation/makeOperation).
+          const files = (payload.entities.chatgptLeads[entityId].files || []).concat(
+            Array.from(fileList).map((f) => ({ id: "f1", name: f.name, size: f.size, url: "https://example.invalid/f1" }))
+          );
+          return bridge.executeOperation(bridge.makeOperation("entity", "update", "chatgptLeads", entityId, { files }));
+        }
+      };
+      const angehaengt = await CG.attachDocument("l1", [{ name: "Vertrag.pdf", size: 204800 }]);
+      ok(angehaengt === true, "der Dokument-Anhang ueber den bestehenden Upload schlug fehl");
+      ok(aufrufe.length === 1 && aufrufe[0].collection === "chatgptLeads" && aufrufe[0].entityId === "l1",
+        `der bestehende Upload wird nicht mit chatgptLeads/l1 aufgerufen: ${JSON.stringify(aufrufe[0] || null)}`);
+      ok(payload.entities.chatgptLeads.l1.files.length === 1 && payload.entities.chatgptLeads.l1.files[0].name === "Vertrag.pdf",
+        "die angehaengte Datei steht nicht im Datenstand");
+
+      const detailNachAnhang = modul.render("chatgptnotes");
+      ok(/Vertrag\.pdf/.test(detailNachAnhang), "die angehaengte Datei wird im Lead-Detail nicht angezeigt");
+      ok(/Öffnen/.test(detailNachAnhang), "die angehaengte Datei bietet keinen Weg zum Oeffnen");
+      delete fensterlos.QuantusTabletWorkspace;
+
+      // Review-Fix (25.09.2026): attachDocument() gab nach uploadTo() IMMER
+      // true zurueck, unabhaengig vom tatsaechlichen Ergebnis. Jetzt muss ein
+      // Fehlschlag (resolved false ODER ein Wurf) auch als Fehlschlag beim
+      // Aufrufer ankommen — kein vorgetaeuschter Erfolg.
+      fensterlos.QuantusTabletWorkspace = { uploadTo: () => Promise.resolve(false) };
+      const beiFehlschlagResolved = await CG.attachDocument("l1", [{ name: "b.pdf", size: 100 }]);
+      ok(beiFehlschlagResolved === false, "ein von uploadTo() als false gemeldeter Fehlschlag wird trotzdem als Erfolg gemeldet");
+
+      fensterlos.QuantusTabletWorkspace = { uploadTo: () => Promise.reject(new Error("Storage nicht erreichbar")) };
+      const beiWurf = await CG.attachDocument("l1", [{ name: "c.pdf", size: 100 }]);
+      ok(beiWurf === false, "ein werfendes uploadTo() (z. B. Storage nicht erreichbar) wird trotzdem als Erfolg gemeldet, statt als abgelehnte Zusage durchzuschlagen");
+      delete fensterlos.QuantusTabletWorkspace;
+    }
+
     // ═══ 4. VERDRAHTUNG ════════════════════════════════════════════════════
     ok(html.indexOf('<script src="chatgpt-app.js">') > 0 && html.indexOf('<script src="chatgpt-app.js">') < html.indexOf('<script src="app.js">'),
       "index.html laedt chatgpt-app.js nicht vor app.js");
@@ -182,6 +514,7 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
     ok(/window\.QuantusChatgpt\.marker\(name, item\.id\)/.test(appJs), "die Sammlungskarten zeigen den Marker nicht");
     ok(/window\.QuantusChatgpt\.taskSection\(name, existing\)/.test(appJs), "das Formular einer Sammlung enthaelt das Feld fuer ChatGPT-Aufgaben nicht");
     ok(/key === "chatgptnotes"\) return window\.QuantusChatgpt/.test(appJs), "die Kachel hat keinen Zaehler");
+    ok(/data-action="cg-task-delegate"/.test(appJs), "die Aufgabenkarte (entityCard) bietet keinen Delegations-Knopf an ChatGPT an");
     ok(!/ß/.test(source), "chatgpt-app.js enthaelt ein ß (Schweizer Schreibweise)");
 
     if (luecken.length) {

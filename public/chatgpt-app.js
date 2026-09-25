@@ -7,9 +7,30 @@
  *              Erfassen, kein Abloesen (das gehoert an den Rechner).
  *   · Leads  — Leseansicht: Eingang nach Gruppen, Detail mit allen Schritten
  *              in fester Reihenfolge, Bewertungsraster, Zuweisung und
- *              erteilten Berechtigungen. Kein Bearbeiten, kein Abschliessen.
+ *              erteilten Berechtigungen. Kein freies Editieren, kein
+ *              Abschliessen — MIT DEN AUSNAHMEN AUS DEM MASTER-PDF
+ *              (Tagesbriefing-Gesamtkonzept-v2, "compact parity"), die der
+ *              App-Besitzer ausdruecklich verlangt hat: eine offene
+ *              Rueckfrage des Assistenten (pendingQuestion) laesst sich
+ *              einmalig beantworten, ein zurueckgekommenes Cowork-Paket
+ *              laesst sich als geprueft markieren, und — neu — Delegation,
+ *              Intake und Dokument-Anhang sind auf dem Tablet ebenfalls
+ *              compact vorhanden (siehe unten). Jede Ausnahme setzt nur
+ *              genau ihre eigenen Felder — kein Bewerten, kein Zuweisen
+ *              eines Leads, kein freies Editieren irgendeines anderen Feldes.
  *   · ChatGPT-Aufgaben — Marker am Element und Anlegen (einzeiliges Feld im
  *              Formular einer Sammlung). Keine Sammelansicht.
+ *   · Delegation — ein Umschalt-Knopf auf der Aufgabenkarte (app.js,
+ *              entityCard) delegiert genau EINE Aufgabe an ChatGPT: legt
+ *              (oder reaktiviert) genau einen verknuepften Lead an, spiegelt
+ *              exakt AI Sync (Desktop) case "task-delegate-chatgpt".
+ *   · Intake  — ein einzeiliges Feld auf dem Hauptbildschirm (Notes/Leads-
+ *              Liste) erstellt sofort einen neuen Lead — die einfachste
+ *              Auspraegung von "Anfrage einreichen" auf dem Tablet, ohne
+ *              eine zweite Warteschlange neben den Leads.
+ *   · Anhang  — im Lead-Detail laesst sich eine Datei an den GEOEFFNETEN
+ *              Lead anhaengen, ueber denselben ~50MB-Upload wie Tablet
+ *              Canvas (window.QuantusTabletWorkspace.uploadTo, unveraendert).
  *
  * Gelesen und geschrieben wird ausschliesslich in entities.chatgptNotes,
  * entities.chatgptLeads und entities.chatgptTasks — genau dort, wo AI Sync
@@ -88,12 +109,21 @@
       (arr(n.tags).length ? '<div class="chip-row">' + arr(n.tags).map(function (t) { return '<span class="chip">#' + esc(t) + "</span>"; }).join("") + "</div>" : "") +
       "</article>";
   }
+  // Intake — "Anfrage einreichen" auf dem Hauptbildschirm (Notes/Leads-
+  // Liste), nicht im Lead-Detail (dort bleibt es bei reinem Lesen plus den
+  // schmalen Ausnahmen). Ein Absenden legt sofort einen Lead an (addChatgptLead)
+  // — die einfachste Auspraegung von "Anfrage einreichen" auf dem Tablet.
+  function renderIntakeBar() {
+    return '<div class="cg-intake"><input type="text" data-action="cg-intake-input" placeholder="Anfrage an ChatGPT einreichen — kurzer Text genügt" autocomplete="off">' +
+      '<button class="btn small-btn" type="button" data-action="cg-intake-submit">Anfrage einreichen</button></div>';
+  }
   function renderNotes() {
     var all = notes();
     var fresh = newNotes();
     var last = lastReadAt();
     var list = ui.notesMode === "all" ? all : fresh;
-    return '<div class="chip-row cg-modes">' +
+    return renderIntakeBar() +
+      '<div class="chip-row cg-modes">' +
       '<button class="chip' + (ui.notesMode !== "all" ? " on" : "") + '" data-action="cg-notes-mode" data-mode="new">Seit letzter Sitzung ' + fresh.length + "</button>" +
       '<button class="chip' + (ui.notesMode === "all" ? " on" : "") + '" data-action="cg-notes-mode" data-mode="all">Alle ' + all.length + "</button>" +
       "</div>" +
@@ -125,6 +155,50 @@
     { key: "quantusNaehe", label: "Quantus-Nähe" }, { key: "recherche", label: "Recherche" }, { key: "zuschnitt", label: "Zuschnitt" }
   ];
   var ASSIGNEE = { chatgpt: "ChatGPT", cowork: "Claude Cowork" };
+  // Neue, rein additive Felder aus AI Sync (Tagesbriefing-Gesamtkonzept-v2).
+  // Reine Anzeige — "nicht gesetzt" statt eine Erfindung, wenn das Feld fehlt.
+  // Einheitlich mit AI Sync (Desktop) V3_OPERATIONAL_STATE_LABEL — dieselben
+  // deutschen Bezeichnungen auf allen drei Clients.
+  var OPERATIONAL_STATE = {
+    doing: "In Arbeit (ChatGPT)", waiting_external: "Wartet extern", followup_scheduled: "Follow-up terminiert",
+    decision_required: "Entscheidung gefragt", information_required: "Frage gestellt",
+    delegated_cowork: "Bei Cowork", review: "Cowork-Rücklauf zu prüfen", done: "Erledigt", cancelled: "Storniert"
+  };
+  function opStateLabel(value) { return OPERATIONAL_STATE[value] || (value ? String(value) : "nicht gesetzt"); }
+  function operationalLine(l) {
+    var line = '<div class="muted small cg-opline">Status: <strong>' + esc(opStateLabel(l.operationalState)) + "</strong>";
+    if (l.responsibleParty) line += " · Verantwortlich: " + esc(l.responsibleParty);
+    if (l.nextAction || l.nextActionAt) {
+      line += " · Nächster Schritt: " + esc(l.nextAction || "nicht gesetzt") +
+        (l.nextActionAt ? " (" + esc(fmtDateTime(l.nextActionAt)) + ")" : "");
+    }
+    if (l.waitingOn || l.waitingSince || l.followUpAt) {
+      line += " · Wartet auf: " + esc(l.waitingOn || "nicht gesetzt") +
+        (l.waitingSince ? " seit " + esc(fmtDateTime(l.waitingSince)) : "") +
+        (l.followUpAt ? " · Nachfrage " + esc(fmtDateTime(l.followUpAt)) : "");
+    }
+    return line + "</div>";
+  }
+  // Rueckfrage des Assistenten — einmalig beantwortbar (answeredAt gesetzt
+  // heisst: erledigt, kein zweites Mal). Sobald beantwortet, nur noch Anzeige.
+  function questionBlock(l) {
+    var q = obj(l.pendingQuestion);
+    if (!q.text) return "";
+    if (q.answeredAt) {
+      return '<div class="cg-question cg-question-done"><div class="cg-step-head"><strong>Rückfrage beantwortet</strong></div>' +
+        '<div class="cg-step-text">' + esc(q.text) + "</div>" +
+        '<div class="muted small">Antwort: ' + esc(q.answer || "") + " · " + esc(fmtDateTime(q.answeredAt)) + "</div></div>";
+    }
+    var options = arr(q.options);
+    return '<div class="cg-question cg-question-open" data-cg-question data-id="' + attr(l.id) + '">' +
+      '<div class="cg-step-head"><strong>Rückfrage vom Assistenten</strong> <span class="cg-warn small">offen</span></div>' +
+      '<div class="cg-step-text">' + esc(q.text) + "</div>" +
+      (options.length ? '<div class="chip-row">' + options.map(function (o) { return '<span class="chip">' + esc(o) + "</span>"; }).join("") + "</div>" : "") +
+      (q.recommendation ? '<div class="muted small">Empfehlung: ' + esc(q.recommendation) + "</div>" : "") +
+      '<textarea data-action="cg-question-input" rows="2" placeholder="Antwort…"></textarea>' +
+      '<button class="btn small-btn" type="button" data-action="cg-question-submit" data-id="' + attr(l.id) + '">Antworten</button>' +
+      "</div>";
+  }
   function linkCount(l) {
     var n = 0;
     Object.keys(obj(l)).forEach(function (k) { if (/^linked[A-Z]/.test(k) && Array.isArray(l[k])) n += l[k].length; });
@@ -170,9 +244,13 @@
       (t.complete ? "" : ' <span class="cg-warn">(' + t.filled + "/" + ASSESSMENT.length + " bewertet)</span>") + "</div>" +
       (String(l.assignmentReason || "").trim() ? '<div class="muted small cg-reason">' + esc(l.assignmentReason) + "</div>" : "") +
       '<div class="muted small cg-perms">' + permissions(l.grantedPermissions) + "</div>" +
-      (l.assignee === "cowork" ? '<div class="muted small">' + (l.handoverAt ? "Übergeben " + esc(fmtDateTime(l.handoverAt)) : "noch nicht übergeben") +
-        (l.returnedAt ? " · zurück " + esc(fmtDateTime(l.returnedAt)) : "") + "</div>" : "") +
+      ((l.assignee === "cowork" || l.handoverAt || l.expectedReturnAt || l.returnedAt) ? '<div class="muted small cg-handover">' +
+        (l.handoverAt ? "Übergeben " + esc(fmtDateTime(l.handoverAt)) : "noch nicht übergeben") +
+        (l.expectedReturnAt ? " · erwartet zurück " + esc(fmtDateTime(l.expectedReturnAt)) : "") +
+        (l.returnedAt ? " · zurück " + esc(fmtDateTime(l.returnedAt)) + (l.returnChecked ? " · geprüft" : " · ungeprüft") : "") +
+        "</div>" : "") +
       (l.handoverPacket ? '<details class="cg-packet"><summary class="muted small">📦 Übergabepaket (' + String(l.handoverPacket).length + " Zeichen)</summary><pre class=\"cg-packet-text\">" + esc(l.handoverPacket) + "</pre></details>" : "") +
+      (l.returnedAt && !l.returnChecked ? '<button class="btn small-btn cg-return-btn" type="button" data-action="cg-return-checked" data-id="' + attr(l.id) + '">Rücklauf geprüft</button>' : "") +
       "</div>";
   }
   function leadCard(l) {
@@ -185,7 +263,9 @@
       '<span class="muted small">' + esc(fmtDate(l.createdAt)) + "</span></div>" +
       "<h3>" + esc(l.title || "(Ohne Titel)") + "</h3>" +
       "<p>" + esc(String(l.rawInput || "").slice(0, 160)) + (String(l.rawInput || "").length > 160 ? "…" : "") + "</p>" +
+      operationalLine(l) +
       assessmentSummary(l) +
+      questionBlock(l) +
       (l.status !== "abgeschlossen" ? '<div class="cg-progress"><div class="cg-progress-bar" style="width:' + Math.round(p.done / p.total * 100) + '%"></div></div>' : "") +
       (l.status === "wartet" && l.blockedReason ? '<div class="muted small cg-warn">⏸ ' + esc(l.blockedReason) + "</div>" : "") +
       "</article>";
@@ -204,6 +284,31 @@
       });
     });
     return out;
+  }
+  function formatBytes(bytes) {
+    var value = Number(bytes) || 0;
+    if (!value) return "0 B";
+    var units = ["B", "KB", "MB", "GB"];
+    var index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), 3);
+    return (value / Math.pow(1024, index)).toFixed(index ? 1 : 0) + " " + units[index];
+  }
+  // Dokument-Anhang am geoeffneten Lead — ueber denselben ~50MB-Upload wie
+  // Tablet Canvas (window.QuantusTabletWorkspace.uploadTo), keine eigene
+  // Upload-Logik. Anzeige nur der Felder, die der bestehende Upload wirklich
+  // liefert (name/size/url) — kein erfundener "verarbeitet"/"indexiert"-Status.
+  function attachmentSection(l) {
+    var files = arr(l.files);
+    var rows = files.map(function (f) {
+      return '<div class="cg-attachment-row"><span class="cg-attachment-name">' + esc(f.name || "Datei") + "</span>" +
+        '<span class="muted small">' + esc(formatBytes(f.size)) + "</span>" +
+        (f.url ? '<a class="btn small-btn" href="' + attr(f.url) + '" target="_blank" rel="noopener noreferrer">Öffnen</a>' : "") + "</div>";
+    }).join("");
+    return '<section class="cg-step cg-upload"><div class="cg-step-head"><strong>Anhänge</strong>' +
+      (files.length ? ' <span class="badge">' + files.length + "</span>" : "") + "</div>" +
+      '<div class="item-list">' + (rows || '<div class="muted small">Keine Anhänge.</div>') + "</div>" +
+      '<label class="btn small-btn" for="cgLeadUpload-' + attr(l.id) + '">📎 Dokument anhängen</label>' +
+      '<input data-action="cg-lead-upload-input" type="file" id="cgLeadUpload-' + attr(l.id) + '" data-id="' + attr(l.id) + '" style="display:none">' +
+      "</section>";
   }
   function renderLeadDetail(id) {
     var l = leads().filter(function (x) { return x.id === id; })[0];
@@ -231,16 +336,19 @@
       '<span class="muted small">Erfasst ' + esc(fmtDateTime(l.createdAt)) + (l.readAt ? " · gelesen " + esc(fmtDateTime(l.readAt)) : " · ungelesen") +
       (l.closedAt ? " · abgeschlossen " + esc(fmtDateTime(l.closedAt)) : "") + "</span></div>" +
       "<h2>" + esc(l.title || "(Ohne Titel)") + "</h2>" +
+      operationalLine(l) +
       '<section class="cg-step"><div class="cg-step-head"><strong>Wortlaut (Laurin)</strong></div><div class="cg-step-text cg-raw">' + esc(l.rawInput || "") + "</div>" +
       (l.obsoleteReason ? '<div class="muted small">Hinfällig, weil: ' + esc(l.obsoleteReason) + "</div>" : "") + "</section>" +
       '<div class="cg-progress-line"><strong>Fortschritt</strong> ' + p.done + "/" + p.total + '<div class="cg-progress"><div class="cg-progress-bar" style="width:' + Math.round(p.done / p.total * 100) + '%"></div></div></div>' +
       (l.status === "wartet" && l.blockedReason ? '<div class="cg-warn">⏸ Wartet: ' + esc(l.blockedReason) + "</div>" : "") +
+      questionBlock(l) +
       steps +
       '<section class="cg-step' + (links.length ? " done" : "") + '"><div class="cg-step-head"><span class="cg-step-no">9</span><strong>Verknüpfungen</strong> <span class="cg-warn small">mindestens eine</span></div>' +
       (links.length ? '<div class="chip-row">' + links.map(function (x) { return '<span class="chip">' + esc(x) + "</span>"; }).join("") + "</div>" : '<div class="muted small">Keine Verknüpfungen.</div>') + "</section>" +
       (arr(l.comments).length ? '<section class="cg-step"><div class="cg-step-head"><strong>Kommentare</strong></div>' + arr(l.comments).map(function (c) {
         return '<div class="cg-comment"><span class="muted small">' + esc(fmtDateTime(c.createdAt)) + "</span><div>" + esc(c.text || "") + "</div></div>";
       }).join("") + "</section>" : "") +
+      attachmentSection(l) +
       '<p class="muted small">Bearbeiten, Bewerten und Abschliessen geschieht am Rechner' + (closed ? "" : " — der Lead bleibt hier lesbar") + ".</p>";
   }
   function renderLeads() {
@@ -254,7 +362,8 @@
       return list.length ? '<h2 class="cg-group" style="color:' + color + '">' + esc(title) + " (" + list.length + ")</h2>" +
         '<div class="content-grid">' + list.map(leadCard).join("") + "</div>" : "";
     }
-    return '<p class="muted small">' + unread.length + " ungelesen · " + (active.length + waiting.length) + " offen · " + closed.length + " abgeschlossen — Leads werden am Rechner oder Handy erfasst und vom Assistenten am Rechner bearbeitet.</p>" +
+    return renderIntakeBar() +
+      '<p class="muted small">' + unread.length + " ungelesen · " + (active.length + waiting.length) + " offen · " + closed.length + " abgeschlossen — Leads werden am Rechner oder Handy erfasst und vom Assistenten am Rechner bearbeitet.</p>" +
       group("🔴 Ungelesen", unread, "#D96B5B") +
       group("🟢 Neu / In Arbeit", active, "#2F8C80") +
       group("🟡 Wartet", waiting, "#C9A96E") +
@@ -367,6 +476,214 @@
     });
   }
 
+  // ── Neuer Lead — Standardform wie AI Sync createChatgptLead() ────────────
+  // Genutzt von Intake (Anfrage einreichen) und von der Delegation, wenn noch
+  // kein Lead existiert — eine einzige Stelle fuer die Lead-Grundform, wie am
+  // Rechner. `extra` ueberschreibt/ergaenzt einzelne Felder (z. B.
+  // operationalState bei der Delegation). Ohne Titel UND Wortlaut wird nichts
+  // angelegt.
+  function addChatgptLead(title, rawInput, extra, forcedId) {
+    var a = api();
+    title = String(title || "").trim();
+    rawInput = String(rawInput || "").trim();
+    if (!a || (!title && !rawInput)) return Promise.resolve(null);
+    if (!title) title = rawInput.split("\n")[0].slice(0, 80);
+    if (!rawInput) rawInput = title;
+    // forcedId (Review-Fix 25.09.2026): erlaubt einer deterministischen ID
+    // (siehe delegateTask unten) statt der Zufalls-ID von Core.makeId — ohne
+    // bestehende Aufrufer (submitIntake u. a.) zu aendern.
+    var id = forcedId || a.Core.makeId("chatgptLead");
+    var patch = Object.assign({
+      title: title, rawInput: rawInput, status: "neu", readAt: null,
+      interpretation: "", openQuestions: "", research: "", plan: "", execution: "", result: "", workflowNote: "",
+      blockedReason: null, closedAt: null, closedBy: null, externalLinks: [], comments: [], files: [],
+      assessment: { menge: null, werkzeug: null, kontext: null, quantusNaehe: null, recherche: null, zuschnitt: null },
+      assignee: null, assignmentReason: "", handoverPacket: null,
+      grantedPermissions: { websuche: false, dateienErstellen: { erlaubt: false, formate: [] }, externeTools: [], verboten: [] },
+      handoverAt: null, returnedAt: null
+    }, extra || {});
+    return a.executeOperation(a.makeOperation("entity", "create", "chatgptLeads", id, patch), { silent: true }).then(function () {
+      return col("chatgptLeads").some(function (x) { return x.id === id; }) ? id : null;
+    });
+  }
+  function submitIntake(input) {
+    var value = String(input.value || "").trim();
+    var a = api();
+    if (!value) { if (a) a.toast("Anfrage fehlt", "Bitte einen Text eintragen.", "warn"); return; }
+    addChatgptLead("", value).then(function (leadId) {
+      if (!leadId) return;
+      input.value = "";
+      if (!a) return;
+      a.toast("Anfrage eingereicht", value.split("\n")[0].slice(0, 60), "ok");
+      a.render();
+    });
+  }
+
+  // ── Delegation: Aufgabe → ChatGPT (Tagesbriefing-Gesamtkonzept-v2) ───────
+  // Spiegelt AI Sync (Desktop), case "task-delegate-chatgpt" in handleClick:
+  // GENAU EIN verknuepfter Lead pro Aufgabe (task.delegatedLeadId ist die
+  // Sperre und wird bei einem geschlossenen Lead reaktiviert statt verdoppelt
+  // — idempotent ueber beliebig viele Delegieren/Zurueckholen-Wechsel), zwei
+  // getrennte Schreiboperationen (Lead, Aufgabe) statt eines zusammengefassten
+  // Patches, damit Lead und Aufgabe auf allen Clients eigene Entitaeten
+  // bleiben. Aufgerufen aus app.js (entityCard, data-action
+  // "cg-task-delegate") ueber onAction unten.
+  function delegateTask(taskId) {
+    var a = api();
+    if (!a) return Promise.resolve(false);
+    var task = col("tasks").filter(function (t) { return t.id === taskId; })[0];
+    if (!task) return Promise.resolve(false);
+    var wasDelegated = (task.assignee || "user") === "chatgpt";
+    var existingLead = task.delegatedLeadId ? leads().filter(function (l) { return l.id === task.delegatedLeadId; })[0] : null;
+    var now = new Date().toISOString();
+
+    if (wasDelegated) {
+      // Zurueckholen: die Aufgabe geht an "user", der verknuepfte Lead bleibt
+      // bestehen (Historie), wird aber als hinfaellig geschlossen — kein
+      // verwaister zweiter Lead beim naechsten Delegieren.
+      var closeOp = existingLead && existingLead.status !== "abgeschlossen"
+        ? a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", existingLead.id, {
+            status: "abgeschlossen", closedAt: now, closedBy: "laurin",
+            obsoleteReason: "Aufgabe wieder zurückgeholt", operationalState: "cancelled", updatedAt: now
+          }), { silent: true })
+        : Promise.resolve(true);
+      var backOp = a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "user" }), { silent: true });
+      return Promise.all([closeOp, backOp]).then(function (r) { return r.every(Boolean); });
+    }
+
+    if (existingLead) {
+      // Wiederverwendung: derselbe Lead wird reaktiviert statt einen zweiten
+      // anzulegen (idempotent).
+      var reusePatch = { operationalState: "doing", updatedAt: now };
+      if (existingLead.status === "abgeschlossen") {
+        reusePatch.status = "neu"; reusePatch.closedAt = null; reusePatch.closedBy = null; reusePatch.obsoleteReason = null;
+      }
+      var reuseOp = a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", existingLead.id, reusePatch), { silent: true });
+      var toChatgptOp = a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt" }), { silent: true });
+      return Promise.all([reuseOp, toChatgptOp]).then(function (r) { return r.every(Boolean); });
+    }
+
+    // Noch kein Lead: deterministische ID aus der Aufgaben-Id (Review-Fix
+    // 25.09.2026, spiegelt AI Sync intake-to-lead/task-delegate-chatgpt) statt
+    // Core.makeId()s Zufalls-ID. Zwei offline Geraete, die dieselbe, noch
+    // nicht delegierte Aufgabe unabhaengig delegieren, berechnen dieselbe ID
+    // — der bestehende Merge nach id (newerItem/mergeById in sync-core.js)
+    // fuehrt beide Versuche zu EINEM Datensatz zusammen, statt einen zweiten,
+    // ueber delegatedLeadId nicht mehr erreichbaren Lead anzulegen.
+    var leadId = "chatgptLead_from_task_" + taskId;
+    var deterministicExisting = leads().filter(function (l) { return l.id === leadId; })[0];
+    if (deterministicExisting) {
+      // Existiert der Lead unter der deterministischen ID bereits (z. B. weil
+      // ein Zwischen-Sync ihn brachte, das eigene delegatedLeadId-Feld aber
+      // noch nicht nachzog), wird er wiederverwendet statt neu angelegt —
+      // sonst koennte eine echte, dort bereits begonnene Bearbeitung
+      // ueberschrieben werden.
+      var reuseDetOp = a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", leadId, { operationalState: "doing", updatedAt: now }), { silent: true });
+      var toChatgptDetOp = a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt", delegatedLeadId: leadId }), { silent: true });
+      return Promise.all([reuseDetOp, toChatgptDetOp]).then(function (r) { return r.every(Boolean); });
+    }
+    return addChatgptLead(task.title, "Delegierte Aufgabe: " + (task.title || ""), { operationalState: "doing" }, leadId).then(function (createdId) {
+      if (!createdId) return false;
+      return a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt", delegatedLeadId: createdId }), { silent: true });
+    });
+  }
+
+  // Dokument an den geoeffneten Lead anhaengen — nutzt den bestehenden
+  // ~50MB-Upload aus Tablet Canvas unveraendert (window.QuantusTabletWorkspace.
+  // uploadTo); hier wird nur auf chatgptLeads/<id> gezeigt. Modulgrenze: erst
+  // typeof pruefen (CLAUDE.md, Fallstrick 1), nicht im Kopf annehmen, dass es
+  // da ist.
+  function attachDocument(leadId, fileList) {
+    var a = api();
+    var ws = window.QuantusTabletWorkspace;
+    if (!a || !leadId || !fileList || !fileList.length) return Promise.resolve(false);
+    if (!ws || typeof ws.uploadTo !== "function") {
+      if (a) a.toast("Anhang nicht möglich", "Das Hochladen ist auf diesem Gerät nicht verfügbar.", "warn");
+      return Promise.resolve(false);
+    }
+    // Review-Fix (25.09.2026): uploadTo()/uploadFiles() liefern seit diesem
+    // Fix ehrlich zurueck, ob der Upload wirklich gelang — vorher wurde hier
+    // IMMER true gemeldet, auch wenn jede Datei fehlschlug (nur als Toast
+    // sichtbar, nie im Rueckgabewert an den Aufrufer). Ein Wurf (z. B.
+    // Storage nicht erreichbar) wird ebenfalls als Fehlschlag gemeldet statt
+    // die Promise unbehandelt abzulehnen.
+    return Promise.resolve(ws.uploadTo("chatgptLeads", leadId, fileList))
+      .then(function (ok) { return ok === true; })
+      .catch(function (error) {
+        if (a) a.toast("Anhang fehlgeschlagen", (error && error.message) || "Unbekannter Fehler", "error");
+        return false;
+      });
+  }
+
+  // ── Zwei weitere schmale Ausnahmen vom "nur lesen" (Rueckfrage, Ruecklauf) ─
+  // Beides schreibt ausschliesslich die hier genannten Felder auf GENAU
+  // diesem Lead (dieselbe id, dieselbe Sammlung chatgptLeads) — kein neues
+  // Element, keine zweite Fassung, kein Bewerten/Zuweisen/Abschliessen.
+  //
+  // Rueckfrage des Assistenten: einmalig beantwortbar. answeredAt ist die
+  // Sperre — ein zweiter Aufruf auf einem bereits beantworteten oder
+  // fehlenden pendingQuestion tut nichts (kein zweites Schreiben moeglich).
+  // Review-Fix: die vorherige Fassung schrieb answer/answeredAt/
+  // operationalState/updatedAt DIREKT auf das lebende Lead-Objekt, BEVOR
+  // makeOperation/executeOperation liefen. Da leads() nur die Liste flach
+  // kopiert (die Elemente selbst bleiben dieselben Referenzen wie in
+  // state.payload), war das keine Kopie, sondern eine Mutation des "Vorher"-
+  // Standes: applyEntityOperation liest genau dieses Objekt als `existing`
+  // fuer den Konflikt-/Zeitstempelvergleich — der "Vorher"-Wert enthielt so
+  // bereits den "Nachher"-Wert. Schlimmer: bei einer ABGELEHNTEN Operation
+  // (Konflikt/Tombstone) oder einem Fehlschlag bricht executeOperation vor
+  // dem Setzen von state.payload ab — aber das Lead-Objekt war durch die
+  // Mutation VORHER schon veraendert, der abgelehnte Zustand blieb sichtbar
+  // stehen. Jetzt: keine Mutation vor der Operation, der Patch wird aus
+  // einer reinen Kopie gebaut, und der echte Erfolg/Misserfolg von
+  // executeOperation wird durchgereicht (nicht mehr blind "true").
+  function answerQuestion(id, text) {
+    var a = api();
+    text = String(text || "").trim();
+    if (!a || !text) return Promise.resolve(false);
+    var l = leads().filter(function (x) { return x.id === id; })[0];
+    if (!l || !l.pendingQuestion || l.pendingQuestion.answeredAt) return Promise.resolve(false);
+    // Auf allen Clients gleich behandelt: ein geschlossener Lead wird durch
+    // eine Antwort nicht reaktiviert (Konsistenz mit Desktop/AI Sync).
+    if (l.status === "abgeschlossen") return Promise.resolve(false);
+    var now = new Date().toISOString();
+    var patchQuestion = Object.assign({}, l.pendingQuestion, { answer: text, answeredAt: now });
+    var operation = a.makeOperation("entity", "update", "chatgptLeads", id, {
+      pendingQuestion: patchQuestion, operationalState: "doing", updatedAt: now,
+      // Auf allen Clients gleich: die faellige Rueckfrage ist erledigt,
+      // der letzte Stand wird vermerkt.
+      questionForBriefingAt: null, lastAction: "Antwort erhalten: " + text.slice(0, 140)
+    });
+    return a.executeOperation(operation, { silent: true });
+  }
+  // Cowork-Ruecklauf als geprueft markieren — nur wenn wirklich zurueck UND
+  // noch nicht geprueft; sonst kein zweites Setzen. Siehe answerQuestion:
+  // keine Mutation vor der Operation, echtes Ergebnis wird durchgereicht.
+  function markReturnChecked(id) {
+    var a = api();
+    if (!a) return Promise.resolve(false);
+    var l = leads().filter(function (x) { return x.id === id; })[0];
+    if (!l || !l.returnedAt || l.returnChecked) return Promise.resolve(false);
+    if (l.status === "abgeschlossen") return Promise.resolve(false);
+    var now = new Date().toISOString();
+    var operation = a.makeOperation("entity", "update", "chatgptLeads", id, {
+      returnChecked: true, operationalState: "doing", updatedAt: now
+    });
+    return a.executeOperation(operation, { silent: true });
+  }
+  function submitQuestionAnswer(button) {
+    var wrap = button.closest ? button.closest("[data-cg-question]") : null;
+    var area = wrap && wrap.querySelector ? wrap.querySelector('[data-action="cg-question-input"]') : null;
+    var a = api();
+    var text = area ? area.value : "";
+    if (!String(text || "").trim()) { if (a) a.toast("Antwort fehlt", "Bitte eine Antwort eintragen.", "warn"); return; }
+    answerQuestion(button.dataset.id, text).then(function (done) {
+      if (!done) return;
+      if (a) a.toast("Antwort gespeichert", "", "ok");
+      if (a) a.render();
+    });
+  }
+
   // ── Aktionen ─────────────────────────────────────────────────────────────
   function onAction(action, button) {
     var a = api();
@@ -382,14 +699,57 @@
       if (input) submitTask(input);
       return true;
     }
+    if (action === "cg-question-submit") { submitQuestionAnswer(button); return true; }
+    if (action === "cg-return-checked") {
+      markReturnChecked(button.dataset.id).then(function (done) {
+        if (!done) return;
+        a.toast("Rücklauf geprüft", "", "ok");
+        a.render();
+      });
+      return true;
+    }
+    if (action === "cg-intake-submit") {
+      var wrap = button.closest ? button.closest(".cg-intake") : null;
+      var input = wrap && wrap.querySelector ? wrap.querySelector('[data-action="cg-intake-input"]') : null;
+      if (input) submitIntake(input);
+      return true;
+    }
+    // Delegation: Aufgabe → ChatGPT. Der Knopf lebt auf der Aufgabenkarte in
+    // app.js (entityCard) — die Modulgrenze ist hier egal, onAction bekommt
+    // jede Aktion der App gereicht (app.js handleClick, tabletModules()).
+    if (action === "cg-task-delegate") {
+      var task = col("tasks").filter(function (t) { return t.id === button.dataset.id; })[0];
+      var wasDelegated = Boolean(task && (task.assignee || "user") === "chatgpt");
+      delegateTask(button.dataset.id).then(function (done) {
+        if (!done) return;
+        a.toast(wasDelegated ? "Zurückgeholt" : "An ChatGPT delegiert", task ? (task.title || "") : "", "ok");
+        a.render();
+      });
+      return true;
+    }
     return false;
   }
   document.addEventListener("keydown", function (event) {
     if (event.key !== "Enter") return;
-    var input = event.target && event.target.closest ? event.target.closest('[data-action="cg-task-input"]') : null;
+    var taskInput = event.target && event.target.closest ? event.target.closest('[data-action="cg-task-input"]') : null;
+    if (taskInput) { event.preventDefault(); submitTask(taskInput); return; }
+    var intakeInput = event.target && event.target.closest ? event.target.closest('[data-action="cg-intake-input"]') : null;
+    if (intakeInput) { event.preventDefault(); submitIntake(intakeInput); }
+  });
+  // Datei-Input feuert "change", nicht "click" — eigener Listener wie bereits
+  // in tablet-workspace.js ueblich (data-tw-change), hier fuer den Lead-Anhang.
+  document.addEventListener("change", function (event) {
+    var input = event.target && event.target.closest ? event.target.closest('[data-action="cg-lead-upload-input"]') : null;
     if (!input) return;
-    event.preventDefault();
-    submitTask(input);
+    var leadId = input.dataset.id;
+    var fileList = input.files;
+    attachDocument(leadId, fileList).then(function (done) {
+      input.value = "";
+      var a = api();
+      if (!done || !a) return;
+      a.toast("Dokument angehängt", "", "ok");
+      a.render();
+    });
   });
 
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({
@@ -400,6 +760,8 @@
   });
   window.QuantusChatgpt = {
     render: render, onAction: onAction, taskSection: taskSection, marker: marker, createTask: createTask,
+    answerQuestion: answerQuestion, markReturnChecked: markReturnChecked,
+    delegateTask: delegateTask, addChatgptLead: addChatgptLead, attachDocument: attachDocument,
     newNotesCount: function () { return newNotes().length; },
     unreadLeadsCount: function () { return unreadLeads().length; },
     openTasksCount: function () { return openTasks().length; },
