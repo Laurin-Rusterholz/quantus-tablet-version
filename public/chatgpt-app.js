@@ -601,7 +601,18 @@
       if (a) a.toast("Anhang nicht möglich", "Das Hochladen ist auf diesem Gerät nicht verfügbar.", "warn");
       return Promise.resolve(false);
     }
-    return Promise.resolve(ws.uploadTo("chatgptLeads", leadId, fileList)).then(function () { return true; });
+    // Review-Fix (25.09.2026): uploadTo()/uploadFiles() liefern seit diesem
+    // Fix ehrlich zurueck, ob der Upload wirklich gelang — vorher wurde hier
+    // IMMER true gemeldet, auch wenn jede Datei fehlschlug (nur als Toast
+    // sichtbar, nie im Rueckgabewert an den Aufrufer). Ein Wurf (z. B.
+    // Storage nicht erreichbar) wird ebenfalls als Fehlschlag gemeldet statt
+    // die Promise unbehandelt abzulehnen.
+    return Promise.resolve(ws.uploadTo("chatgptLeads", leadId, fileList))
+      .then(function (ok) { return ok === true; })
+      .catch(function (error) {
+        if (a) a.toast("Anhang fehlgeschlagen", (error && error.message) || "Unbekannter Fehler", "error");
+        return false;
+      });
   }
 
   // ── Zwei weitere schmale Ausnahmen vom "nur lesen" (Rueckfrage, Ruecklauf) ─

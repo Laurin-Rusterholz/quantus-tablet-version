@@ -489,6 +489,19 @@ ok(CG && typeof CG.taskSection === "function" && typeof CG.marker === "function"
       ok(/Vertrag\.pdf/.test(detailNachAnhang), "die angehaengte Datei wird im Lead-Detail nicht angezeigt");
       ok(/Öffnen/.test(detailNachAnhang), "die angehaengte Datei bietet keinen Weg zum Oeffnen");
       delete fensterlos.QuantusTabletWorkspace;
+
+      // Review-Fix (25.09.2026): attachDocument() gab nach uploadTo() IMMER
+      // true zurueck, unabhaengig vom tatsaechlichen Ergebnis. Jetzt muss ein
+      // Fehlschlag (resolved false ODER ein Wurf) auch als Fehlschlag beim
+      // Aufrufer ankommen — kein vorgetaeuschter Erfolg.
+      fensterlos.QuantusTabletWorkspace = { uploadTo: () => Promise.resolve(false) };
+      const beiFehlschlagResolved = await CG.attachDocument("l1", [{ name: "b.pdf", size: 100 }]);
+      ok(beiFehlschlagResolved === false, "ein von uploadTo() als false gemeldeter Fehlschlag wird trotzdem als Erfolg gemeldet");
+
+      fensterlos.QuantusTabletWorkspace = { uploadTo: () => Promise.reject(new Error("Storage nicht erreichbar")) };
+      const beiWurf = await CG.attachDocument("l1", [{ name: "c.pdf", size: 100 }]);
+      ok(beiWurf === false, "ein werfendes uploadTo() (z. B. Storage nicht erreichbar) wird trotzdem als Erfolg gemeldet, statt als abgelehnte Zusage durchzuschlagen");
+      delete fensterlos.QuantusTabletWorkspace;
     }
 
     // ═══ 4. VERDRAHTUNG ════════════════════════════════════════════════════
