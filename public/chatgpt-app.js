@@ -482,14 +482,17 @@
   // Rechner. `extra` ueberschreibt/ergaenzt einzelne Felder (z. B.
   // operationalState bei der Delegation). Ohne Titel UND Wortlaut wird nichts
   // angelegt.
-  function addChatgptLead(title, rawInput, extra) {
+  function addChatgptLead(title, rawInput, extra, forcedId) {
     var a = api();
     title = String(title || "").trim();
     rawInput = String(rawInput || "").trim();
     if (!a || (!title && !rawInput)) return Promise.resolve(null);
     if (!title) title = rawInput.split("\n")[0].slice(0, 80);
     if (!rawInput) rawInput = title;
-    var id = a.Core.makeId("chatgptLead");
+    // forcedId (Review-Fix 25.09.2026): erlaubt einer deterministischen ID
+    // (siehe delegateTask unten) statt der Zufalls-ID von Core.makeId — ohne
+    // bestehende Aufrufer (submitIntake u. a.) zu aendern.
+    var id = forcedId || a.Core.makeId("chatgptLead");
     var patch = Object.assign({
       title: title, rawInput: rawInput, status: "neu", readAt: null,
       interpretation: "", openQuestions: "", research: "", plan: "", execution: "", result: "", workflowNote: "",
@@ -560,11 +563,28 @@
       return Promise.all([reuseOp, toChatgptOp]).then(function (r) { return r.every(Boolean); });
     }
 
-    // Noch kein Lead: genau einen anlegen und auf der Aufgabe vermerken
-    // (delegatedLeadId ist danach die Sperre gegen einen zweiten Lead).
-    return addChatgptLead(task.title, "Delegierte Aufgabe: " + (task.title || ""), { operationalState: "doing" }).then(function (leadId) {
-      if (!leadId) return false;
-      return a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt", delegatedLeadId: leadId }), { silent: true });
+    // Noch kein Lead: deterministische ID aus der Aufgaben-Id (Review-Fix
+    // 25.09.2026, spiegelt AI Sync intake-to-lead/task-delegate-chatgpt) statt
+    // Core.makeId()s Zufalls-ID. Zwei offline Geraete, die dieselbe, noch
+    // nicht delegierte Aufgabe unabhaengig delegieren, berechnen dieselbe ID
+    // — der bestehende Merge nach id (newerItem/mergeById in sync-core.js)
+    // fuehrt beide Versuche zu EINEM Datensatz zusammen, statt einen zweiten,
+    // ueber delegatedLeadId nicht mehr erreichbaren Lead anzulegen.
+    var leadId = "chatgptLead_from_task_" + taskId;
+    var deterministicExisting = leads().filter(function (l) { return l.id === leadId; })[0];
+    if (deterministicExisting) {
+      // Existiert der Lead unter der deterministischen ID bereits (z. B. weil
+      // ein Zwischen-Sync ihn brachte, das eigene delegatedLeadId-Feld aber
+      // noch nicht nachzog), wird er wiederverwendet statt neu angelegt —
+      // sonst koennte eine echte, dort bereits begonnene Bearbeitung
+      // ueberschrieben werden.
+      var reuseDetOp = a.executeOperation(a.makeOperation("entity", "update", "chatgptLeads", leadId, { operationalState: "doing", updatedAt: now }), { silent: true });
+      var toChatgptDetOp = a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt", delegatedLeadId: leadId }), { silent: true });
+      return Promise.all([reuseDetOp, toChatgptDetOp]).then(function (r) { return r.every(Boolean); });
+    }
+    return addChatgptLead(task.title, "Delegierte Aufgabe: " + (task.title || ""), { operationalState: "doing" }, leadId).then(function (createdId) {
+      if (!createdId) return false;
+      return a.executeOperation(a.makeOperation("entity", "update", "tasks", taskId, { assignee: "chatgpt", delegatedLeadId: createdId }), { silent: true });
     });
   }
 
