@@ -41,7 +41,6 @@
     notes: "note", ideas: "idea", notebooks: "notebook", books: "book",
     tasks: "task", projects: "project", scheduledMessages: "scheduledMessage"
   };
-  const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
   function tombstoneTimeIn(log, id) {
     if (!isObject(log)) return 0;
     let latest = 0;
@@ -87,15 +86,10 @@
     const bucket = TOMBSTONE_BUCKETS[collection] || String(collection || "entity");
     if (!isObject(payload._deleteLog[bucket])) payload._deleteLog[bucket] = {};
     payload._deleteLog[bucket][id] = at;
-    const cutoff = Date.now() - TOMBSTONE_TTL_MS;
-    for (const key of Object.keys(payload._deleteLog)) {
-      const entries = payload._deleteLog[key];
-      if (!isObject(entries)) { delete payload._deleteLog[key]; continue; }
-      for (const entryId of Object.keys(entries)) {
-        if ((Number(entries[entryId]) || 0) < cutoff) delete entries[entryId];
-      }
-      if (!Object.keys(entries).length) delete payload._deleteLog[key];
-    }
+    // Offline-Operationen koennen aelter als ein Aufbewahrungsfenster sein.
+    // Die Geraeteuhr darf weder ihren gerade geschriebenen Grabstein noch
+    // fremde Loeschbelege entfernen. Kuerzung gehoert in einen serverseitigen,
+    // verifizierten Archivlauf; eine beliebige Tablet-Loeschung ist keiner.
   }
   function clearTombstone(payload, id) {
     const log = isObject(payload && payload._deleteLog) ? payload._deleteLog : null;

@@ -23,6 +23,20 @@ const op = (action, id, patch, updatedAt, extra = {}) => ({
   patch, updatedAt, operationId: "op-" + id + "-" + updatedAt, ...extra,
 });
 
+// Ein alter Offline-Delete darf seine eigene oder fremde Loeschsperre nicht
+// anhand der heutigen Geraeteuhr entfernen (v4 T08/T10/T35).
+{
+  const old = "2000-01-01T10:00:00Z";
+  const payload = { entities: { notes: { old: { id: "old", updatedAt: "1999-12-31T10:00:00Z" } } },
+    _deleteLog: { task: { foreign: t(old) } }, meta: {} };
+  const result = Sync.applyOperation(payload, op("delete", "old", {}, old));
+  eq(result.applied, true);
+  eq(result.payload._deleteLog.note.old, t(old), "frisch bestaetigte alte Offline-Loeschung bleibt geschuetzt");
+  eq(result.payload._deleteLog.task.foreign, t(old), "fremde alte Loeschbelege bleiben unveraendert");
+  const replay = Sync.applyOperation(result.payload, op("update", "old", { content: "stale" }, "1999-12-31T11:00:00Z"));
+  eq(replay.applied, false, "alter Offline-Inhalt darf nach dem Delete nicht wieder entstehen");
+}
+
 // ── 1) Wiederauferstehung: Grabstein ist juenger als die Offline-Op ──
 {
   const payload = { entities: { notes: {} }, _deleteLog: { note: { n1: t("2026-08-30T10:00:00Z") } }, meta: {} };
