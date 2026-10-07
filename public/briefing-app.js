@@ -66,6 +66,8 @@
     try { b = a.briefingModell(tag); } catch (fehler) { b = null; }
     if (!b) return '<div class="view">' + a.viewHeader("Morgenbriefing", "Der Tag liess sich nicht berechnen.", "") + "</div>";
 
+    if (window.renderQuantusTabletBriefing && window.QuantusChatgpt) return window.renderQuantusTabletBriefing(a, tag);
+
     var routinen = arr(b.routinen);
     var routinenFertig = routinen.filter(function (h) { return a.isHabitDoneOn(h, tag); }).length;
     var ziele = arr(b.tagesziele);
@@ -231,6 +233,7 @@
   (window.__quantusTabletModules = window.__quantusTabletModules || []).push({
     key: "briefing",
     routes: ["dailybriefing"],
-    render: render
+    render: render,
+    mount: function () { if (window.mountQuantusTabletBriefing) window.mountQuantusTabletBriefing(); }
   });
 })();
