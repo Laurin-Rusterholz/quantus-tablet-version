@@ -1,5 +1,13 @@
-const CACHE = "quantus-tablet-v30-chatgpt";
+const CACHE = "quantus-tablet-v31-briefing-dashboard";
 const SHELL = [
+  '/quantus-briefing-device.js',
+  '/quantus-briefing-device.css',
+  '/quantus-briefing-device-controller.mjs',
+  '/quantus-v3-command-client.mjs',
+  '/quantus-v3-briefing-answers.mjs',
+  '/quantus-v4-quick-capture.mjs',
+  '/briefing-device-adapter.mjs',
+
   "/", "/index.html", "/styles.css", "/tablet-workspace.css", "/apps.css",
   "/quantus-tablet-expansion.css", "/native-modules.css", "/bm-app.css", "/sticky-app.css", "/pdf-viewer.css", "/briefing-app.css",
   "/pdf-viewer.js", "/notes-core.js", "/sync-core.js", "/tablet-workspace.js", "/springboard.js", "/mail-app.js", "/googlecalendar-app.js", "/flowertech-app.js",

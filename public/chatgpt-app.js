@@ -298,7 +298,7 @@
   // liefert (name/size/url) — kein erfundener "verarbeitet"/"indexiert"-Status.
   function attachmentSection(l) {
     var files = arr(l.files);
-    var rows = files.map(function (f) {
+    var rows = files.filter(function(f) { try { return ["https:", "http:"].includes(new URL(f.url).protocol); } catch (_) { return false; } }).map(function (f) {
       return '<div class="cg-attachment-row"><span class="cg-attachment-name">' + esc(f.name || "Datei") + "</span>" +
         '<span class="muted small">' + esc(formatBytes(f.size)) + "</span>" +
         (f.url ? '<a class="btn small-btn" href="' + attr(f.url) + '" target="_blank" rel="noopener noreferrer">Öffnen</a>' : "") + "</div>";
@@ -759,6 +759,7 @@
     onAction: onAction
   });
   window.QuantusChatgpt = {
+    attachmentSection: attachmentSection,
     render: render, onAction: onAction, taskSection: taskSection, marker: marker, createTask: createTask,
     answerQuestion: answerQuestion, markReturnChecked: markReturnChecked,
     delegateTask: delegateTask, addChatgptLead: addChatgptLead, attachDocument: attachDocument,
